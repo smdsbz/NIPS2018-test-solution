@@ -25,9 +25,22 @@ import os
 
 ''' Configurations '''
 
+import argparse
 
-SUMMARY_DIR     = 'summary/policy_gradient'
-MODEL_SAVE_PATH = 'model/actor.parameters'
+parser = argparse.ArgumentParser()
+parser.add_argument('-n', '--name', nargs=1)
+args = parser.parse_args()
+args = vars(args)
+if args['name'] is None:
+    raise ValueError('option `name` cannot be `None` !')
+
+SUMMARY_DIR     = 'summary/pg_run{}'.format(args['name'][0])
+MODEL_SAVE_PATH = 'model/run{}.parameters'.format(args['name'][0])
+if os.path.isdir(SUMMARY_DIR) or os.path.exists(MODEL_SAVE_PATH):
+    raise ValueError('run with name {} already exists !'
+                     .format(args['name'][0]))
+print('Summary file will be saved at {}'.format(SUMMARY_DIR))
+print('Actor model parameter will be saved at {}'.format(MODEL_SAVE_PATH))
 
 
 ''' Hyperparameters '''
@@ -278,6 +291,7 @@ def train():
             # save good model
             if last_test_reward < test_reward:
                 last_test_reward = test_reward
+                open(MODEL_SAVE_PATH, 'w').close()   # HACK: `touch` an empty file
                 torch.save(
                     policy_net.state_dict(),
                     MODEL_SAVE_PATH
