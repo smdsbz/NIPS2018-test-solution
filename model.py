@@ -20,13 +20,20 @@ class SimpleNetwork(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(SimpleNetwork, self).__init__()
         self.fc1 = nn.Linear(input_dim, 512)
+        # NOTE: don't use `SELU` !!!
+        self.activ1 = nn.LeakyReLU(0.1)
         self.fc2 = nn.Linear(512, 512)
+        self.activ2 = nn.LeakyReLU(0.1)
         self.fc3 = nn.Linear(512, 512)
+        self.activ3 = nn.LeakyReLU(0.1)
+        self.fc4 = nn.Linear(512, 512)
+        self.activ4 = nn.LeakyReLU(0.1)
         self.out = nn.Linear(512, output_dim)
 
     def forward(self, x):
-        x = F.leaky_relu(self.fc1(x))
-        x = F.leaky_relu(self.fc2(x))
-        x = F.leaky_relu(self.fc3(x))
+        x = self.activ1(self.fc1(x))
+        x = self.activ2(self.fc2(x))
+        x = self.activ3(self.fc3(x))
+        x = self.activ4(self.fc3(x))
         return self.out(x)
 
