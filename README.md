@@ -9,6 +9,8 @@ Exploring possible solutions for NIPS2018 challenge. This repo is for convenienc
 
 ## Requirements
 
+*(other than `opensim-rl`)*
+
 - Python 3
 - PyTorch
 - tensorboardX
