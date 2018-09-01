@@ -19,10 +19,12 @@ class ReplayMemory:
         `size`: maximum capacity of memory
         '''
         self._size = size
-        self.__record_class = namedtuple('ReplayRecord',
-                                         'obs, act, act_score, rew, done, q')
+        self.__record_class = namedtuple(
+            'ReplayRecord',
+            'obs, last_act,  act, act_score, rew, done, q'
+        )
         self._memory = self.__record_class(
-            obs=[], act=[], act_score=[], rew=[], done=[], q=[]
+            obs=[], last_act=[], act=[], act_score=[], rew=[], done=[], q=[]
         )
         self._pointer = 0
 
@@ -32,6 +34,7 @@ class ReplayMemory:
     def __getitem__(self, key):
         return self.__record_class(
             obs=self._memory.obs[key % self._size],
+            last_act=self._memory.last_act[key % self._size],
             act=self._memory.act[key % self._size],
             act_score=self._memory.act_score[key % self._size],
             rew=self._memory.rew[key % self._size],
@@ -46,13 +49,10 @@ class ReplayMemory:
         Args:
             `contents`: `dict` of objects to be stored
         '''
-        # content checking
-        # if len(contents) != 5:
-        #     raise ValueError('Illegal item to store: must be tuple of 5, '
-        #                       + 'got {}!'.format(len(contents)))
         # alloc space if still can
         if len(self._memory.obs) < self._size:
             self._memory.obs.append(None)
+            self._memory.last_act.append(None)
             self._memory.act.append(None)
             self._memory.act_score.append(None)
             self._memory.rew.append(None)
@@ -60,6 +60,7 @@ class ReplayMemory:
             self._memory.q.append(None)
         # store values
         self._memory.obs[self._pointer] = contents['obs']
+        self._memory.last_act[self._pointer] = contents['last_act']
         self._memory.act[self._pointer] = contents['act']
         self._memory.act_score[self._pointer] = contents['act_score']
         self._memory.rew[self._pointer] = contents['rew']
@@ -70,7 +71,8 @@ class ReplayMemory:
         return
 
     def storemany(self, contents):
-        if len(contents['obs']) != len(contents['act'])                 \
+        if len(contents['obs']) != len(contents['last_act'])            \
+                or len(contents['obs']) != len(contents['act'])         \
                 or len(contents['obs']) != len(contents['act_score'])   \
                 or len(contents['obs']) != len(contents['rew'])         \
                 or len(contents['obs']) != len(contents['done'])        \
@@ -79,6 +81,7 @@ class ReplayMemory:
         for idx in range(len(contents['obs'])):
             self.store({
                 'obs': contents['obs'][idx],
+                'last_act': contents['last_act'][idx],
                 'act': contents['act'][idx],
                 'act_score': contents['act_score'][idx],
                 'rew': contents['rew'][idx],
@@ -99,10 +102,11 @@ class ReplayMemory:
         '''
         idxes = random.sample(range(len(self._memory.obs)), batch_size)
         retsample = self.__record_class(
-            obs=[], act=[], act_score=[], rew=[], done=[], q=[]
+            obs=[], last_act=[], act=[], act_score=[], rew=[], done=[], q=[]
         )
         for idx in idxes:
             retsample.obs.append(self._memory.obs[idx])
+            retsample.last_act.append(self._memory.last_act[idx])
             retsample.act.append(self._memory.act[idx])
             retsample.act_score.append(self._memory.act_score[idx])
             retsample.rew.append(self._memory.rew[idx])

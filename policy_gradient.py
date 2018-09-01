@@ -27,17 +27,18 @@ import os
 
 
 SUMMARY_DIR     = 'summary/policy_gradient'
+MODEL_SAVE_PATH = 'model/actor.parameters'
 
 
 ''' Hyperparameters '''
 
 
 EPISODE         = int(1e5)
-REPLAY_SIZE     = int(1e4)
+REPLAY_SIZE     = int(1e5)
 MIN_BATCH_SIZE  = 2 ** 8
 
-GAMMA           = 1 - 1e-3
-POLICY_LR       = 1e-2
+GAMMA           = 1 - 1e-1
+POLICY_LR       = 1e-3
 BASELINE_LR     = 1e-3
 
 
@@ -51,7 +52,7 @@ state_dim = len(env.reset())
 action_dim = env.action_space.sample().shape[0]
 
 # policy network
-policy_net = SimpleNetwork(state_dim, action_dim).to(device=device)
+policy_net = SimpleNetwork(state_dim + action_dim, action_dim).to(device=device)
 action_logdev = torch.ones(action_dim, device=device, requires_grad=True)
 get_mean_actions = lambda obs: torch.sigmoid(policy_net(obs))   # action \in [0, 1]^{19}
 
@@ -75,21 +76,23 @@ baseline_optimizer = optim.Adam(baseline_net.parameters(), lr=BASELINE_LR)
 ''' Helper Functions '''
 
 
-def get_action(obs, deterministic=False):
+def get_action(obs, last_act, deterministic=False):
     '''
     get action from policy net
 
     Args:
         `obs`: observation vector
+        `last_act`: action taken in last step
         `deterministic`: whether to apply randomizer
 
     Return:
-        While `deterministic` is `True`, returns action vector;
-        otherwise returns randomized action and its scores w.r.t. randomizer
+        When `deterministic` is `True`, returns action vector only;
+        else returns randomized action and its scores w.r.t. randomizer
     '''
-    mean_action = get_mean_actions(
-        torch.tensor([obs], dtype=torch.float32, device=device)
-    )[0]
+    obs = torch.tensor(obs, dtype=torch.float32, device=device)
+    last_act = torch.tensor(last_act, dtype=torch.float32, device=device)
+    feature = torch.cat([obs, last_act]).reshape([1, -1])
+    mean_action = get_mean_actions(feature)[0]
     if deterministic:
         return mean_action
     randomizer = torch.distributions.MultivariateNormal(
@@ -133,9 +136,12 @@ def interact_once():
         `dict`: new trajectory
     '''
     last_obs = env.reset()
+    # TODO: 0-th step YOLO-ed, come back with something better !
+    last_act = env.action_space.sample()
     done = False
     trajectory = {
         'obs': [],
+        'last_act': [],
         'act': [],
         'act_score': [],
         'rew': [],
@@ -144,17 +150,18 @@ def interact_once():
     }
     while not done:
         # take step in environment
-        act, act_scores = get_action(last_obs)
+        act, act_scores = get_action(last_obs, last_act)
         act = act.detach().cpu().numpy()
         obs, rew, done, _ = env.step(act)
         # add to memory
         trajectory['obs'].append(last_obs)
+        trajectory['last_act'].append(last_act)
         trajectory['act'].append(act)
         trajectory['act_score'].append(act_scores)
         trajectory['rew'].append(rew)
         trajectory['done'].append(done)
         # prepare for next step
-        last_obs = obs
+        last_obs, last_act = obs, act
     trajectory['q'] = get_q(trajectory['rew'])
     return trajectory
 
@@ -162,13 +169,14 @@ def interact_once():
 def test_run_reward():
     reward_sum = 0.0
     last_obs = env.reset()
+    last_act = env.action_space.sample()
     done = False
     while not done:
-        act = get_action(last_obs, deterministic=True)
+        act = get_action(last_obs, last_act, deterministic=True)    # only `act` is returned
         act = act.detach().cpu().numpy()
         obs, rew, done, _ = env.step(act)
         reward_sum += rew
-        last_obs = obs
+        last_obs, last_act = obs, act
     return reward_sum
 
 
@@ -192,6 +200,8 @@ def train():
         trajectory = interact_once()
         replay_buffer.storemany(trajectory)
     print('\rCollecting first run done!' + ' ' * 10)    # new line
+
+    last_test_reward = -1e4     # HACK: value small enough
 
     for episode in range(EPISODE):
         print('======== Episode {} ========'.format(episode))
@@ -217,6 +227,7 @@ def train():
         )
 
         # get baselines
+        # NOTE: using state-only baseline
         baselines_raw = baseline_net(observations).reshape(-1)
         baselines = (
             baselines_raw * q_values.std(dim=0)
@@ -264,6 +275,13 @@ def train():
             test_reward = test_run_reward()
             writer.add_scalar('test_reward', test_reward, episode)
             print('==> test reward:', test_reward)
+            # save good model
+            if last_test_reward < test_reward:
+                last_test_reward = test_reward
+                torch.save(
+                    policy_net.state_dict(),
+                    MODEL_SAVE_PATH
+                )
     # end for
 
 
