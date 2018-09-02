@@ -21,6 +21,8 @@ from utils import ReplayMemory
 from osim.env import ProstheticsEnv
 
 import os
+import time
+import json
 
 
 ''' Configurations '''
@@ -29,13 +31,18 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-n', '--name', nargs=1)
+parser.add_argument('-s', '--seed', nargs=1)
 args = parser.parse_args()
 args = vars(args)
 if args['name'] is None:
     raise ValueError('option `name` cannot be `None` !')
+if args['seed'] is not None:
+    torch.manual_seed(args['seed'][0])
+else:
+    torch.manual_seed(int(time.time()))
 
 SUMMARY_DIR     = 'summary/pg_run{}'.format(args['name'][0])
-MODEL_SAVE_PATH = 'model/run{}.parameters'.format(args['name'][0])
+MODEL_SAVE_PATH = 'model/run{}.actor'.format(args['name'][0])
 if os.path.isdir(SUMMARY_DIR) or os.path.exists(MODEL_SAVE_PATH):
     raise ValueError('run with name {} already exists !'
                      .format(args['name'][0]))
@@ -47,7 +54,7 @@ print('Actor model parameter will be saved at {}'.format(MODEL_SAVE_PATH))
 
 
 EPISODE         = int(1e5)
-REPLAY_SIZE     = int(1e5)
+REPLAY_SIZE     = int(1e4)
 MIN_BATCH_SIZE  = 2 ** 8
 
 GAMMA           = 1 - 1e-1
@@ -79,11 +86,13 @@ get_baselines = lambda obs: baseline_net(obs)
 
 # policy network
 policy_loss = nn.L1Loss()
-policy_optimizer = optim.Adam(policy_net.parameters(), lr=POLICY_LR)
+policy_optimizer = optim.SGD(policy_net.parameters(),
+                             lr=POLICY_LR, momentum=0.5)
 
 # baseline network
 baseline_loss = nn.SmoothL1Loss()
-baseline_optimizer = optim.Adam(baseline_net.parameters(), lr=BASELINE_LR)
+baseline_optimizer = optim.SGD(baseline_net.parameters(),
+                               lr=BASELINE_LR, momentum=0.5)
 
 
 ''' Helper Functions '''
@@ -199,10 +208,13 @@ def test_run_reward():
 def train():
     global action_logdev
 
-    writer = SummaryWriter(log_dir=SUMMARY_DIR + '-' +
-                           'bs={}_gamma={}_policylr={}_baselinelr={}'
-                           .format(MIN_BATCH_SIZE, GAMMA, POLICY_LR,
-                                   BASELINE_LR))
+    writer = SummaryWriter(log_dir=SUMMARY_DIR)
+    with open(os.path.join(SUMMARY_DIR, 'hyperparams.txt'), 'w') as f:
+        # TODO: jsonify this !
+        f.write(
+            'bs={}\ngamma={}\npolicylr={}\nbaselinelr={}'
+            .format(MIN_BATCH_SIZE, GAMMA, POLICY_LR, BASELINE_LR)
+        )
 
     # fill replay buffer with sufficient data
     replay_buffer = ReplayMemory(REPLAY_SIZE)

@@ -34,6 +34,6 @@ class SimpleNetwork(nn.Module):
         x = self.activ1(self.fc1(x))
         x = self.activ2(self.fc2(x))
         x = self.activ3(self.fc3(x))
-        x = self.activ4(self.fc3(x))
+        x = self.activ4(self.fc4(x))
         return self.out(x)
 
