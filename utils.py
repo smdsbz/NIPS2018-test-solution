@@ -147,3 +147,4 @@ class LinearDecayImpulse:
         ret = self.value()
         self.step()
         return ret
+

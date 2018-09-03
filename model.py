@@ -20,7 +20,6 @@ class SimpleNetwork(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(SimpleNetwork, self).__init__()
         self.fc1 = nn.Linear(input_dim, 512)
-        # NOTE: don't use `SELU` !!!
         self.activ1 = nn.LeakyReLU(0.1)
         self.fc2 = nn.Linear(512, 512)
         self.activ2 = nn.LeakyReLU(0.1)

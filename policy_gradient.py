@@ -32,19 +32,25 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('-n', '--name', nargs=1)
 parser.add_argument('-s', '--seed', nargs=1)
+parser.add_argument('-d', '--device', nargs=1)
 args = parser.parse_args()
 args = vars(args)
 if args['name'] is None:
-    raise ValueError('option `name` cannot be `None` !')
+    raise ValueError('option `name` cannot be `None`!')
 if args['seed'] is not None:
     torch.manual_seed(args['seed'][0])
+# else:
+#     torch.manual_seed(int(time.time()))
+if args['device'] is None:
+    pass
 else:
-    torch.manual_seed(int(time.time()))
+    os.environ['CUDA_VISIBLE_DEVICES'] = args['device'][0]
+    print('Only GPU{} is visible!'.format(os.environ['CUDA_VISIBLE_DEVICES']))
 
 SUMMARY_DIR     = 'summary/pg_run{}'.format(args['name'][0])
 MODEL_SAVE_PATH = 'model/run{}.actor'.format(args['name'][0])
 if os.path.isdir(SUMMARY_DIR) or os.path.exists(MODEL_SAVE_PATH):
-    raise ValueError('run with name {} already exists !'
+    raise ValueError('actor with name {} already exists!'
                      .format(args['name'][0]))
 print('Summary file will be saved at {}'.format(SUMMARY_DIR))
 print('Actor model parameter will be saved at {}'.format(MODEL_SAVE_PATH))
@@ -53,13 +59,13 @@ print('Actor model parameter will be saved at {}'.format(MODEL_SAVE_PATH))
 ''' Hyperparameters '''
 
 
-EPISODE         = int(1e5)
-REPLAY_SIZE     = int(1e4)
-MIN_BATCH_SIZE  = 2 ** 8
+EPISODE         = int(1e5)      # this will probably never be reached
+REPLAY_SIZE     = int(3 * 1e4)  # NOTE: a large value will consume VRAM dramatically!
+MIN_BATCH_SIZE  = 2 ** 4
 
-GAMMA           = 1 - 1e-1
-POLICY_LR       = 1e-3
-BASELINE_LR     = 1e-3
+GAMMA           = 1 - 1e-3  # how far does the model collect rewards
+POLICY_LR       = 1e-4      # works okay at 1e-3
+BASELINE_LR     = 1e-3      # works fine at 1e-3
 
 
 ''' Module Initalizations '''
@@ -74,11 +80,11 @@ action_dim = env.action_space.sample().shape[0]
 # policy network
 policy_net = SimpleNetwork(state_dim + action_dim, action_dim).to(device=device)
 action_logdev = torch.ones(action_dim, device=device, requires_grad=True)
-get_mean_actions = lambda obs: torch.sigmoid(policy_net(obs))   # action \in [0, 1]^{19}
+get_mean_actions = lambda feat: torch.sigmoid(policy_net(feat))     # action \in [0, 1]^{19}
 
 # baseline network
-baseline_net = SimpleNetwork(state_dim, 1).to(device=device)
-get_baselines = lambda obs: baseline_net(obs)
+baseline_net = SimpleNetwork(state_dim + action_dim, 1).to(device=device)
+get_baselines = lambda feat: baseline_net(feat)
 
 
 ''' Training Ops '''
@@ -86,13 +92,13 @@ get_baselines = lambda obs: baseline_net(obs)
 
 # policy network
 policy_loss = nn.L1Loss()
-policy_optimizer = optim.SGD(policy_net.parameters(),
-                             lr=POLICY_LR, momentum=0.5)
+policy_optimizer = optim.Adam(policy_net.parameters(),
+                              lr=POLICY_LR)
 
 # baseline network
 baseline_loss = nn.SmoothL1Loss()
-baseline_optimizer = optim.SGD(baseline_net.parameters(),
-                               lr=BASELINE_LR, momentum=0.5)
+baseline_optimizer = optim.Adam(baseline_net.parameters(),
+                                lr=BASELINE_LR)
 
 
 ''' Helper Functions '''
@@ -113,7 +119,8 @@ def get_action(obs, last_act, deterministic=False):
     '''
     obs = torch.tensor(obs, dtype=torch.float32, device=device)
     last_act = torch.tensor(last_act, dtype=torch.float32, device=device)
-    feature = torch.cat([obs, last_act]).reshape([1, -1])
+    feature = torch.cat([obs, last_act])
+    feature = torch.stack([feature])
     mean_action = get_mean_actions(feature)[0]
     if deterministic:
         return mean_action
@@ -232,8 +239,10 @@ def train():
         print('======== Episode {} ========'.format(episode))
 
         # insert new trajectory
-        trajectory = interact_once()
-        replay_buffer.storemany(trajectory)
+        for _ in range(1):
+            trajectory = interact_once()
+            replay_buffer.storemany(trajectory)
+        # TODO: insert best run
 
         # get sample trajectories
         sample = replay_buffer.sample(MIN_BATCH_SIZE)
@@ -244,16 +253,28 @@ def train():
             device=device
         )
 
-        # get observations (flattened)
+        # get observations
         observations = torch.tensor(
             sample.obs,
             dtype=torch.float32,
             device=device
         )
+        # print('observations size:', observations.shape)
+        # get actions
+        actions = torch.tensor(
+            sample.act,
+            dtype=torch.float32,
+            device=device
+        )
+        # print('actions size:', actions.shape)
+        baseline_feature = torch.cat([observations, actions], dim=1)
+        # print(baseline_feature.shape)
 
         # get baselines
         # NOTE: using state-only baseline
-        baselines_raw = baseline_net(observations).reshape(-1)
+        baselines_raw = get_baselines(baseline_feature).reshape([-1])
+        # print(baselines_raw.shape)
+        # print(q_values.shape)
         baselines = (
             baselines_raw * q_values.std(dim=0)
             + q_values.mean(dim=0)
