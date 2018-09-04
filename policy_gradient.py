@@ -60,11 +60,11 @@ print('Actor model parameter will be saved at {}'.format(MODEL_SAVE_PATH))
 
 
 EPISODE         = int(1e5)      # this will probably never be reached
-REPLAY_SIZE     = int(1 * 1e4)  # NOTE: a large value will consume VRAM dramatically!
-MIN_BATCH_SIZE  = 2 ** 4
+REPLAY_SIZE     = int(2 * 1e4)  # `1 * 1e4` takes little bit more than half a gig
+MIN_BATCH_SIZE  = 2 ** 7
 
-GAMMA           = 1 - 1e-3  # how far does the model collect rewards
-POLICY_LR       = 3 * 1e-4
+GAMMA           = 0.95
+POLICY_LR       = 1e-3
 BASELINE_LR     = 1e-3
 
 
@@ -79,7 +79,7 @@ action_dim = env.action_space.sample().shape[0]
 
 # policy network
 policy_net = SimpleNetwork(state_dim + action_dim, action_dim).to(device=device)
-action_logdev = torch.ones(action_dim, device=device, requires_grad=True)
+action_dev = torch.ones(action_dim, device=device, requires_grad=False)
 get_mean_actions = lambda feat: torch.sigmoid(policy_net(feat))     # action \in [0, 1]^{19}
 
 # baseline network
@@ -126,7 +126,7 @@ def get_action(obs, last_act, deterministic=False):
         return mean_action
     randomizer = torch.distributions.MultivariateNormal(
         loc=mean_action,
-        covariance_matrix=torch.diag(action_logdev)
+        covariance_matrix=torch.diag(action_dev)
     )
     stocastic_action = randomizer.sample()
     scores = -randomizer.log_prob(stocastic_action)
@@ -154,7 +154,7 @@ def get_q(rewards, gamma=GAMMA):
     ])
 
 
-def interact_once():
+def interact_once(env=env, smooth_action=False):
     '''
     interact with environment using __current policy__
 
@@ -164,8 +164,11 @@ def interact_once():
     Return:
         `dict`: new trajectory
     '''
+    # regularize parameter `smooth_action`
+    if not smooth_action:
+        smooth_action = 1
     last_obs = env.reset()
-    # TODO: 0-th step YOLO-ed, come back with something better !
+    # TODO: YOLO the 0-th step, come back with something better !
     last_act = env.action_space.sample()
     done = False
     trajectory = {
@@ -181,16 +184,20 @@ def interact_once():
         # take step in environment
         act, act_scores = get_action(last_obs, last_act)
         act = act.detach().cpu().numpy()
-        obs, rew, done, _ = env.step(act)
-        # add to memory
-        trajectory['obs'].append(last_obs)
-        trajectory['last_act'].append(last_act)
-        trajectory['act'].append(act)
-        trajectory['act_score'].append(act_scores)
-        trajectory['rew'].append(rew)
-        trajectory['done'].append(done)
-        # prepare for next step
-        last_obs, last_act = obs, act
+        for _ in range(smooth_action):
+            if done:
+                break
+            obs, rew, done, _ = env.step(act)
+            # add to memory
+            trajectory['obs'].append(last_obs)
+            trajectory['last_act'].append(last_act)
+            trajectory['act'].append(act)
+            trajectory['act_score'].append(act_scores)
+            trajectory['rew'].append(rew)
+            trajectory['done'].append(done)
+            # prepare for next step
+            last_obs, last_act = obs, act
+    # make summary
     trajectory['q'] = get_q(trajectory['rew'])
     return trajectory
 
@@ -213,7 +220,7 @@ def test_run_reward():
 
 
 def train():
-    global action_logdev
+    global action_dev
 
     writer = SummaryWriter(log_dir=SUMMARY_DIR)
     with open(os.path.join(SUMMARY_DIR, 'hyperparams.txt'), 'w') as f:
@@ -229,7 +236,7 @@ def train():
         print('\rCollecting first run: {:.2f}%'
               .format(len(replay_buffer) / MIN_BATCH_SIZE * 100.0),
               end='')
-        trajectory = interact_once()
+        trajectory = interact_once(smooth_action=5)
         replay_buffer.storemany(trajectory)
     print('\rCollecting first run done!' + ' ' * 10)    # new line
 
@@ -240,8 +247,9 @@ def train():
 
         # insert new trajectory
         for _ in range(1):
-            trajectory = interact_once()
+            trajectory = interact_once(smooth_action=5)
             replay_buffer.storemany(trajectory)
+        torch.cuda.empty_cache()    # NOTE: let's hope this will work!
         # TODO: insert best run
 
         # get sample trajectories
@@ -296,20 +304,22 @@ def train():
 
         # update policy net
         policy_optimizer.zero_grad()
-        if action_logdev.grad is not None:
-            action_logdev.grad.zero_()
+        # if action_dev.grad is not None:
+        #     action_dev.grad.zero_()
         loss = policy_loss(scores, advantages)
         writer.add_scalar('policy_loss', loss, episode)
         print('policy loss:', loss)
         loss.backward(retain_graph=True)
         policy_optimizer.step()
-        if action_logdev.grad is not None:
-            with torch.no_grad():
-                action_logdev -= POLICY_LR * action_logdev.grad
-        writer.add_histogram('action_logdev',
-                             action_logdev.detach().cpu().numpy(),
+        # if action_dev.grad is not None:
+        #     with torch.no_grad():
+        #         action_dev -= POLICY_LR * action_dev.grad
+        writer.add_histogram('action_dev',
+                             # action_dev.detach().cpu().numpy(),
+                             action_dev.cpu().numpy(),
                              episode)
-        # print('action_logdev:', action_logdev)
+        # print('action_dev:', action_dev)
+        action_dev *= 0.995
 
         # test and eval
         if episode % 5 == 0:

@@ -58,6 +58,8 @@ class ReplayMemory:
             self._memory.rew.append(None)
             self._memory.done.append(None)
             self._memory.q.append(None)
+        # else:
+        #     print('utils.py:ReplayMemory: storage reached rooftop, replacing older records!')
         # store values
         self._memory.obs[self._pointer] = contents['obs']
         self._memory.last_act[self._pointer] = contents['last_act']
@@ -68,7 +70,6 @@ class ReplayMemory:
         self._memory.q[self._pointer] = contents['q']
         # pointer to next location
         self._pointer = (self._pointer + 1) % self._size
-        torch.cuda.empty_cache()    # TODO: hope this will work!
         return
 
     def storemany(self, contents):
