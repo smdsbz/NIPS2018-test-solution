@@ -1,0 +1,4 @@
+bs=16
+gamma=0.999
+policylr=0.0001
+baselinelr=0.001

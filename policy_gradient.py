@@ -60,12 +60,12 @@ print('Actor model parameter will be saved at {}'.format(MODEL_SAVE_PATH))
 
 
 EPISODE         = int(1e5)      # this will probably never be reached
-REPLAY_SIZE     = int(3 * 1e4)  # NOTE: a large value will consume VRAM dramatically!
+REPLAY_SIZE     = int(1 * 1e4)  # NOTE: a large value will consume VRAM dramatically!
 MIN_BATCH_SIZE  = 2 ** 4
 
 GAMMA           = 1 - 1e-3  # how far does the model collect rewards
-POLICY_LR       = 1e-4      # works okay at 1e-3
-BASELINE_LR     = 1e-3      # works fine at 1e-3
+POLICY_LR       = 3 * 1e-4
+BASELINE_LR     = 1e-3
 
 
 ''' Module Initalizations '''
@@ -259,22 +259,17 @@ def train():
             dtype=torch.float32,
             device=device
         )
-        # print('observations size:', observations.shape)
         # get actions
         actions = torch.tensor(
             sample.act,
             dtype=torch.float32,
             device=device
         )
-        # print('actions size:', actions.shape)
         baseline_feature = torch.cat([observations, actions], dim=1)
-        # print(baseline_feature.shape)
 
         # get baselines
         # NOTE: using state-only baseline
         baselines_raw = get_baselines(baseline_feature).reshape([-1])
-        # print(baselines_raw.shape)
-        # print(q_values.shape)
         baselines = (
             baselines_raw * q_values.std(dim=0)
             + q_values.mean(dim=0)

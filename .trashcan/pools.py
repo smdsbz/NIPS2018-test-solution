@@ -24,35 +24,38 @@ from osim.env import ProstheticsEnv
 #             pass
 
 
-# class EnvironmentPool:
-# 
-#     def __init__(self, pool_size=4):
-#         self._pool_size = pool_size
-#         # self._args_queues = [
-#         #     Queue(1) for _ in range(pool_size)
-#         # ]
-#         # self._return_queues = [
-#         #     Queue(1) for _ in range(pool_size)
-#         # ]
-#         # self._pool = [
-#         #     Process(target=env_read_service,
-#         #             args=(
-#         #                 self._args_queues[id],
-#         #                 self._return_queues[id]
-#         #             ))
-#         #     for id in range(pool_size)
-#         # ]
-#         # self._occupie = [ False, ] * pool_size
-#         self._envs = [
-#             ProstheticsEnv(visualize=False)
-#             for _ in range(pool_size)
-#         ]
-# 
-#     def _step_on_one(self, envidx, act):
-#         return self._envs[envidx].step(act)
-# 
-#     def run(self, controller):
-#         trajectories = [ [], ] * self._pool_size
-#         dones = [False,] * self._pool_size
-#         # TODO
+class EnvironmentPool:
+
+    def __init__(self, pool_size=4):
+        self._pool_size = pool_size
+        # self._args_queues = [
+        #     Queue(1) for _ in range(pool_size)
+        # ]
+        # self._return_queues = [
+        #     Queue(1) for _ in range(pool_size)
+        # ]
+        # self._pool = [
+        #     Process(target=env_read_service,
+        #             args=(
+        #                 self._args_queues[id],
+        #                 self._return_queues[id]
+        #             ))
+        #     for id in range(pool_size)
+        # ]
+        # self._occupie = [ False, ] * pool_size
+        self._envs = [
+            ProstheticsEnv(visualize=False)
+            for _ in range(pool_size)
+        ]
+
+    def __len__(self):
+        return self._pool_size
+
+    def _step_on_one(self, envidx, act):
+        return self._envs[envidx].step(act)
+
+    def run(self, controller):
+        trajectories = [ [], ] * self._pool_size
+        dones = [False,] * self._pool_size
+        # TODO
 

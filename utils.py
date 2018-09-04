@@ -50,7 +50,7 @@ class ReplayMemory:
             `contents`: `dict` of objects to be stored
         '''
         # alloc space if still can
-        if len(self._memory.obs) < self._size:
+        if len(self) < self._size:
             self._memory.obs.append(None)
             self._memory.last_act.append(None)
             self._memory.act.append(None)
@@ -68,6 +68,7 @@ class ReplayMemory:
         self._memory.q[self._pointer] = contents['q']
         # pointer to next location
         self._pointer = (self._pointer + 1) % self._size
+        torch.cuda.empty_cache()    # TODO: hope this will work!
         return
 
     def storemany(self, contents):
