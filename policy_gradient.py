@@ -79,7 +79,8 @@ action_dim = env.action_space.sample().shape[0]
 
 # policy network
 policy_net = SimpleNetwork(state_dim + action_dim, action_dim).to(device=device)
-action_dev = torch.ones(action_dim, device=device, requires_grad=False)
+# action_dev = torch.ones(action_dim, device=device, requires_grad=False)
+action_dev = 3.0
 get_mean_actions = lambda feat: torch.sigmoid(policy_net(feat))     # action \in [0, 1]^{19}
 
 # baseline network
@@ -126,7 +127,7 @@ def get_action(obs, last_act, deterministic=False):
         return mean_action
     randomizer = torch.distributions.MultivariateNormal(
         loc=mean_action,
-        covariance_matrix=torch.diag(action_dev)
+        covariance_matrix=torch.diag(torch.ones([action_dim]) * action_dev).to(device=device)
     )
     stocastic_action = randomizer.sample()
     scores = -randomizer.log_prob(stocastic_action)
@@ -314,12 +315,14 @@ def train():
         # if action_dev.grad is not None:
         #     with torch.no_grad():
         #         action_dev -= POLICY_LR * action_dev.grad
-        writer.add_histogram('action_dev',
-                             # action_dev.detach().cpu().numpy(),
-                             action_dev.cpu().numpy(),
-                             episode)
+        # writer.add_histogram('action_dev',
+        #                      # action_dev.detach().cpu().numpy(),
+        #                      action_dev.cpu().numpy(),
+        #                      episode)
+        writer.add_scalar('action_dev', action_dev, episode)
         # print('action_dev:', action_dev)
-        action_dev *= 0.995
+        if action_dev > 0.5:
+            action_dev *= 0.995
 
         # test and eval
         if episode % 5 == 0:
