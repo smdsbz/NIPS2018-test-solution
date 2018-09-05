@@ -59,13 +59,17 @@ print('Actor model parameter will be saved at {}'.format(MODEL_SAVE_PATH))
 ''' Hyperparameters '''
 
 
-EPISODE         = int(1e5)      # this will probably never be reached
-REPLAY_SIZE     = int(2 * 1e4)  # `1 * 1e4` takes little bit more than half a gig
+EPISODE         = int(1e5)
+REPLAY_SIZE     = int(1e6)
 MIN_BATCH_SIZE  = 2 ** 7
 
 GAMMA           = 0.95
-POLICY_LR       = 1e-3
-BASELINE_LR     = 1e-3
+POLICY_LR       = 1e-5
+BASELINE_LR     = 1e-4
+
+START_DEVIATION = 10.0
+MIN_DEVIATION   = 1.7
+DEVIATION_DECAY = 0.997
 
 
 ''' Module Initalizations '''
@@ -80,7 +84,7 @@ action_dim = env.action_space.sample().shape[0]
 # policy network
 policy_net = SimpleNetwork(state_dim + action_dim, action_dim).to(device=device)
 # action_dev = torch.ones(action_dim, device=device, requires_grad=False)
-action_dev = 3.0
+action_dev = START_DEVIATION
 get_mean_actions = lambda feat: torch.sigmoid(policy_net(feat))     # action \in [0, 1]^{19}
 
 # baseline network
@@ -92,7 +96,7 @@ get_baselines = lambda feat: baseline_net(feat)
 
 
 # policy network
-policy_loss = nn.L1Loss()
+# policy_loss = nn.L1Loss(reduce=True)
 policy_optimizer = optim.Adam(policy_net.parameters(),
                               lr=POLICY_LR)
 
@@ -203,7 +207,7 @@ def interact_once(env=env, smooth_action=False):
     return trajectory
 
 
-def test_run_reward():
+def test_run_reward(smooth_action=5):
     reward_sum = 0.0
     last_obs = env.reset()
     last_act = env.action_space.sample()
@@ -211,9 +215,12 @@ def test_run_reward():
     while not done:
         act = get_action(last_obs, last_act, deterministic=True)    # only `act` is returned
         act = act.detach().cpu().numpy()
-        obs, rew, done, _ = env.step(act)
-        reward_sum += rew
-        last_obs, last_act = obs, act
+        for _ in range(smooth_action):
+            if done:
+                break
+            obs, rew, done, _ = env.step(act)
+            reward_sum += rew
+            last_obs, last_act = obs, act
     return reward_sum
 
 
@@ -307,7 +314,8 @@ def train():
         policy_optimizer.zero_grad()
         # if action_dev.grad is not None:
         #     action_dev.grad.zero_()
-        loss = policy_loss(scores, advantages)
+        # loss = policy_loss(scores, advantages)
+        loss = torch.sum(scores * advantages)
         writer.add_scalar('policy_loss', loss, episode)
         print('policy loss:', loss)
         loss.backward(retain_graph=True)
@@ -321,8 +329,8 @@ def train():
         #                      episode)
         writer.add_scalar('action_dev', action_dev, episode)
         # print('action_dev:', action_dev)
-        if action_dev > 0.5:
-            action_dev *= 0.995
+        if action_dev > MIN_DEVIATION:
+            action_dev *= DEVIATION_DECAY
 
         # test and eval
         if episode % 5 == 0:
