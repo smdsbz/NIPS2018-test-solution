@@ -60,7 +60,7 @@ print('Actor model parameter will be saved at {}'.format(MODEL_SAVE_PATH))
 
 
 EPISODE         = int(1e5)
-REPLAY_SIZE     = int(1e6)
+REPLAY_SIZE     = int(5 * 2 * 1e4)
 MIN_BATCH_SIZE  = 2 ** 7
 
 GAMMA           = 0.95
@@ -131,7 +131,9 @@ def get_action(obs, last_act, deterministic=False):
         return mean_action
     randomizer = torch.distributions.MultivariateNormal(
         loc=mean_action,
-        covariance_matrix=torch.diag(torch.ones([action_dim]) * action_dev).to(device=device)
+        covariance_matrix=torch.eye(action_dim,
+                                    dtype=torch.float32,
+                                    device=device) * action_dev
     )
     stocastic_action = randomizer.sample()
     scores = -randomizer.log_prob(stocastic_action)
@@ -286,17 +288,19 @@ def train():
         # get baselines
         # NOTE: using state-only baseline
         baselines_raw = get_baselines(baseline_feature).reshape([-1])
-        baselines = (
-            baselines_raw * q_values.std(dim=0)
-            + q_values.mean(dim=0)
-        )
+        # baselines = (
+        #     baselines_raw * q_values.std(dim=0)
+        #     + q_values.mean(dim=0)
+        # )
+        baselines = baselines_raw
 
         # update baseline net
         baseline_optimizer.zero_grad()
-        loss = baseline_loss(
-            baselines_raw,
-            (q_values - q_values.mean(dim=0)) / (q_values.std(dim=0) + 1e-8)
-        )
+        # loss = baseline_loss(
+        #     baselines_raw,
+        #     (q_values - q_values.mean(dim=0)) / (q_values.std(dim=0) + 1e-8)
+        # )
+        loss = baseline_loss(baselines, q_values)
         writer.add_scalar('baseline_loss', loss, episode)
         print('baseline loss:', loss)
         loss.backward(retain_graph=True)
@@ -307,8 +311,8 @@ def train():
 
         # get advantages
         advantages = q_values - baselines.detach()
-        # - normalize advantage
-        advantages = advantages / (advantages.std(dim=0) + 1e-8)
+        # # - normalize advantage
+        # advantages = advantages / (advantages.std(dim=0) + 1e-8)
 
         # update policy net
         policy_optimizer.zero_grad()
