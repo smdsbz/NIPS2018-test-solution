@@ -48,24 +48,30 @@ else:
     print('Only GPU{} is visible!'.format(os.environ['CUDA_VISIBLE_DEVICES']))
 
 SUMMARY_DIR     = 'summary/pg_run{}'.format(args['name'][0])
-MODEL_SAVE_PATH = 'model/run{}.actor'.format(args['name'][0])
-if os.path.isdir(SUMMARY_DIR) or os.path.exists(MODEL_SAVE_PATH):
+MODEL_SAVE_DIR  = 'model/'
+BASELINE_SAVE_PATH  = os.path.join(MODEL_SAVE_DIR, 'baseline.param')
+ACTOR_SAVE_PATH = os.path.join(MODEL_SAVE_DIR, 'run{}.actor'.format(args['name'][0]))
+if os.path.isdir(SUMMARY_DIR) or os.path.exists(ACTOR_SAVE_PATH):
     raise ValueError('actor with name {} already exists!'
                      .format(args['name'][0]))
 print('Summary file will be saved at {}'.format(SUMMARY_DIR))
-print('Actor model parameter will be saved at {}'.format(MODEL_SAVE_PATH))
+print('Actor model parameter will be saved at {}'.format(ACTOR_SAVE_PATH))
 
 
 ''' Hyperparameters '''
 
 
-EPISODE         = int(1e5)      # this will probably never be reached
-REPLAY_SIZE     = int(2 * 1e4)  # `1 * 1e4` takes little bit more than half a gig
+EPISODE         = int(1e5)
+REPLAY_SIZE     = int(5 * 2 * 1e4)
 MIN_BATCH_SIZE  = 2 ** 7
 
 GAMMA           = 0.95
-POLICY_LR       = 1e-3
-BASELINE_LR     = 1e-3
+POLICY_LR       = 1e-6
+BASELINE_LR     = 1e-4
+
+START_DEVIATION = 10.0
+MIN_DEVIATION   = 1.7
+DEVIATION_DECAY = 0.997
 
 
 ''' Module Initalizations '''
@@ -80,19 +86,25 @@ action_dim = env.action_space.sample().shape[0]
 # policy network
 policy_net = SimpleNetwork(state_dim + action_dim, action_dim).to(device=device)
 # action_dev = torch.ones(action_dim, device=device, requires_grad=False)
-action_dev = 3.0
+action_dev = START_DEVIATION
 get_mean_actions = lambda feat: torch.sigmoid(policy_net(feat))     # action \in [0, 1]^{19}
 
 # baseline network
 baseline_net = SimpleNetwork(state_dim + action_dim, 1).to(device=device)
 get_baselines = lambda feat: baseline_net(feat)
+# load previously trained model if exists
+if os.path.exists(BASELINE_SAVE_PATH):
+    baseline_net.load_state_dict(torch.load(BASELINE_SAVE_PATH))
+    print('Baseline network parameters loaded successfully!')
+
+print('')
 
 
 ''' Training Ops '''
 
 
 # policy network
-policy_loss = nn.L1Loss()
+# policy_loss = nn.L1Loss(reduce=True)
 policy_optimizer = optim.Adam(policy_net.parameters(),
                               lr=POLICY_LR)
 
@@ -127,9 +139,14 @@ def get_action(obs, last_act, deterministic=False):
         return mean_action
     randomizer = torch.distributions.MultivariateNormal(
         loc=mean_action,
-        covariance_matrix=torch.diag(torch.ones([action_dim]) * action_dev).to(device=device)
+        covariance_matrix=torch.eye(action_dim,
+                                    dtype=torch.float32,
+                                    device=device) * action_dev
     )
     stocastic_action = randomizer.sample()
+    # cutoff into [0, 1]
+    stocastic_action = torch.min(stocastic_action, torch.ones(action_dim))
+    stocastic_action = torch.max(stocastic_action, torch.zeros(action_dim))
     scores = -randomizer.log_prob(stocastic_action)
     return stocastic_action, scores
 
@@ -203,7 +220,7 @@ def interact_once(env=env, smooth_action=False):
     return trajectory
 
 
-def test_run_reward():
+def test_run_reward(smooth_action=5):
     reward_sum = 0.0
     last_obs = env.reset()
     last_act = env.action_space.sample()
@@ -211,9 +228,12 @@ def test_run_reward():
     while not done:
         act = get_action(last_obs, last_act, deterministic=True)    # only `act` is returned
         act = act.detach().cpu().numpy()
-        obs, rew, done, _ = env.step(act)
-        reward_sum += rew
-        last_obs, last_act = obs, act
+        for _ in range(smooth_action):
+            if done:
+                break
+            obs, rew, done, _ = env.step(act)
+            reward_sum += rew
+            last_obs, last_act = obs, act
     return reward_sum
 
 
@@ -277,65 +297,85 @@ def train():
         baseline_feature = torch.cat([observations, actions], dim=1)
 
         # get baselines
-        # NOTE: using state-only baseline
         baselines_raw = get_baselines(baseline_feature).reshape([-1])
-        baselines = (
-            baselines_raw * q_values.std(dim=0)
-            + q_values.mean(dim=0)
-        )
+        # baselines = (
+        #     baselines_raw * q_values.std(dim=0)
+        #     + q_values.mean(dim=0)
+        # )
+        baselines = baselines_raw
 
         # update baseline net
         baseline_optimizer.zero_grad()
-        loss = baseline_loss(
-            baselines_raw,
-            (q_values - q_values.mean(dim=0)) / (q_values.std(dim=0) + 1e-8)
-        )
-        writer.add_scalar('baseline_loss', loss, episode)
+        loss = baseline_loss(baselines, q_values)
+        writer.add_scalar('train/baseline_loss', loss, episode)
         print('baseline loss:', loss)
         loss.backward(retain_graph=True)
         baseline_optimizer.step()
 
-        # get scores (flattened)
+        # get scores
         scores = torch.stack(sample.act_score)
+        writer.add_histogram('debug/action_scores', scores, episode)
 
         # get advantages
         advantages = q_values - baselines.detach()
-        # - normalize advantage
-        advantages = advantages / (advantages.std(dim=0) + 1e-8)
+        # # - normalize advantage
+        # advantages = advantages / (advantages.std(dim=0) + 1e-8)
+        writer.add_histogram('debug/advantages', advantages, episode)
 
         # update policy net
         policy_optimizer.zero_grad()
         # if action_dev.grad is not None:
         #     action_dev.grad.zero_()
-        loss = policy_loss(scores, advantages)
-        writer.add_scalar('policy_loss', loss, episode)
+        ############################################################
+        # Loss for Policy Network
+        #
+        # $$
+        # \text{degree of deviation} \times \text{direction}
+        # $$
+        #
+        # where
+        # - $\text{degree of deviation}$ is minus log-prob of action actually
+        #   taken aginst the original intention
+        # - $\text{direction}$ is the advanges in Q-values, i.e. Bellman error
+        #
+        # We'd wish this loss is minimized via zeroing $\text{direction}$.
+        # However, this value is detached from the graph in this implementation,
+        # the optimizer is now shrinking the minus log-probs in a generous fashion instead.
+        ############################################################
+        loss = torch.sum(scores * advantages)
+        writer.add_scalar('train/policy_loss', loss, episode)
         print('policy loss:', loss)
         loss.backward(retain_graph=True)
         policy_optimizer.step()
         # if action_dev.grad is not None:
         #     with torch.no_grad():
         #         action_dev -= POLICY_LR * action_dev.grad
-        # writer.add_histogram('action_dev',
+        # writer.add_histogram('debug/action_dev',
         #                      # action_dev.detach().cpu().numpy(),
         #                      action_dev.cpu().numpy(),
         #                      episode)
-        writer.add_scalar('action_dev', action_dev, episode)
-        # print('action_dev:', action_dev)
-        if action_dev > 0.5:
-            action_dev *= 0.995
+        writer.add_scalar('debug/action_dev', action_dev, episode)
+        if action_dev > MIN_DEVIATION:
+            action_dev *= DEVIATION_DECAY
 
         # test and eval
         if episode % 5 == 0:
             test_reward = test_run_reward()
-            writer.add_scalar('test_reward', test_reward, episode)
+            writer.add_scalar('test/test_reward', test_reward, episode)
             print('==> test reward:', test_reward)
-            # save good model
+            # save baseline model
+            open(BASELINE_SAVE_PATH, 'w').close()   # HACK: `touch` an empty file
+            torch.save(
+                baseline_net.state_dict(),
+                BASELINE_SAVE_PATH
+            )
+            # save good actor model
             if last_test_reward < test_reward:
                 last_test_reward = test_reward
-                open(MODEL_SAVE_PATH, 'w').close()   # HACK: `touch` an empty file
+                open(ACTOR_SAVE_PATH, 'w').close()
                 torch.save(
                     policy_net.state_dict(),
-                    MODEL_SAVE_PATH
+                    ACTOR_SAVE_PATH
                 )
     # end for
 
@@ -344,4 +384,6 @@ def train():
 
 
 if __name__ == '__main__':
+    print('======== Start Training ========')
     train()
+
