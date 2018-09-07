@@ -48,12 +48,14 @@ else:
     print('Only GPU{} is visible!'.format(os.environ['CUDA_VISIBLE_DEVICES']))
 
 SUMMARY_DIR     = 'summary/pg_run{}'.format(args['name'][0])
-MODEL_SAVE_PATH = 'model/run{}.actor'.format(args['name'][0])
-if os.path.isdir(SUMMARY_DIR) or os.path.exists(MODEL_SAVE_PATH):
+MODEL_SAVE_DIR  = 'model/'
+BASELINE_SAVE_PATH  = os.path.join(MODEL_SAVE_DIR, 'baseline.param')
+ACTOR_SAVE_PATH = os.path.join(MODEL_SAVE_DIR, 'run{}.actor'.format(args['name'][0]))
+if os.path.isdir(SUMMARY_DIR) or os.path.exists(ACTOR_SAVE_PATH):
     raise ValueError('actor with name {} already exists!'
                      .format(args['name'][0]))
 print('Summary file will be saved at {}'.format(SUMMARY_DIR))
-print('Actor model parameter will be saved at {}'.format(MODEL_SAVE_PATH))
+print('Actor model parameter will be saved at {}'.format(ACTOR_SAVE_PATH))
 
 
 ''' Hyperparameters '''
@@ -64,7 +66,7 @@ REPLAY_SIZE     = int(5 * 2 * 1e4)
 MIN_BATCH_SIZE  = 2 ** 7
 
 GAMMA           = 0.95
-POLICY_LR       = 1e-5
+POLICY_LR       = 1e-6
 BASELINE_LR     = 1e-4
 
 START_DEVIATION = 10.0
@@ -90,6 +92,12 @@ get_mean_actions = lambda feat: torch.sigmoid(policy_net(feat))     # action \in
 # baseline network
 baseline_net = SimpleNetwork(state_dim + action_dim, 1).to(device=device)
 get_baselines = lambda feat: baseline_net(feat)
+# load previously trained model if exists
+if os.path.exists(BASELINE_SAVE_PATH):
+    baseline_net.load_state_dict(torch.load(BASELINE_SAVE_PATH))
+    print('Baseline network parameters loaded successfully!')
+
+print('')
 
 
 ''' Training Ops '''
@@ -301,18 +309,20 @@ def train():
         #     (q_values - q_values.mean(dim=0)) / (q_values.std(dim=0) + 1e-8)
         # )
         loss = baseline_loss(baselines, q_values)
-        writer.add_scalar('baseline_loss', loss, episode)
+        writer.add_scalar('train/baseline_loss', loss, episode)
         print('baseline loss:', loss)
         loss.backward(retain_graph=True)
         baseline_optimizer.step()
 
         # get scores (flattened)
         scores = torch.stack(sample.act_score)
+        writer.add_histogram('debug/action_scores', scores, episode)
 
         # get advantages
         advantages = q_values - baselines.detach()
-        # # - normalize advantage
-        # advantages = advantages / (advantages.std(dim=0) + 1e-8)
+        # - normalize advantage
+        advantages = advantages / (advantages.std(dim=0) + 1e-8)
+        writer.add_histogram('debug/advantages', advantages, episode)
 
         # update policy net
         policy_optimizer.zero_grad()
@@ -320,18 +330,18 @@ def train():
         #     action_dev.grad.zero_()
         # loss = policy_loss(scores, advantages)
         loss = torch.sum(scores * advantages)
-        writer.add_scalar('policy_loss', loss, episode)
+        writer.add_scalar('train/policy_loss_abs', loss, episode)
         print('policy loss:', loss)
         loss.backward(retain_graph=True)
         policy_optimizer.step()
         # if action_dev.grad is not None:
         #     with torch.no_grad():
         #         action_dev -= POLICY_LR * action_dev.grad
-        # writer.add_histogram('action_dev',
+        # writer.add_histogram('debug/action_dev',
         #                      # action_dev.detach().cpu().numpy(),
         #                      action_dev.cpu().numpy(),
         #                      episode)
-        writer.add_scalar('action_dev', action_dev, episode)
+        writer.add_scalar('debug/action_dev', action_dev, episode)
         # print('action_dev:', action_dev)
         if action_dev > MIN_DEVIATION:
             action_dev *= DEVIATION_DECAY
@@ -339,15 +349,21 @@ def train():
         # test and eval
         if episode % 5 == 0:
             test_reward = test_run_reward()
-            writer.add_scalar('test_reward', test_reward, episode)
+            writer.add_scalar('test/test_reward', test_reward, episode)
             print('==> test reward:', test_reward)
-            # save good model
+            # save baseline model
+            open(BASELINE_SAVE_PATH, 'w').close()   # HACK: `touch` an empty file
+            torch.save(
+                baseline_net.state_dict(),
+                BASELINE_SAVE_PATH
+            )
+            # save good actor model
             if last_test_reward < test_reward:
                 last_test_reward = test_reward
-                open(MODEL_SAVE_PATH, 'w').close()   # HACK: `touch` an empty file
+                open(ACTOR_SAVE_PATH, 'w').close()
                 torch.save(
                     policy_net.state_dict(),
-                    MODEL_SAVE_PATH
+                    ACTOR_SAVE_PATH
                 )
     # end for
 
@@ -356,4 +372,6 @@ def train():
 
 
 if __name__ == '__main__':
+    print('======== Start Training ========')
     train()
+
