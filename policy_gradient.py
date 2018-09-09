@@ -105,7 +105,8 @@ print('')
 
 
 # policy network
-# policy_loss = nn.L1Loss(reduce=True)
+policy_loss = nn.L1Loss(reduction='sum')
+policy_loss_target = torch.zeros([MIN_BATCH_SIZE], dtype=torch.float32, device=device)
 policy_optimizer = optim.Adam(policy_net.parameters(),
                               lr=POLICY_LR)
 
@@ -346,8 +347,7 @@ def train():
         # However, this value is detached from the graph in this implementation,
         # the optimizer is now shrinking the minus log-probs in a generous fashion instead.
         ############################################################
-        # loss = torch.sum(scores * advantages)
-        loss = - torch.abs(torch.sum(scores * advantages))    # NOTE: minimize to 0!
+        loss = policy_loss(scores * advantages, policy_loss_target)
         writer.add_scalar('train/policy_loss', loss, episode)
         print('policy loss:', loss)
         loss.backward(retain_graph=True)
