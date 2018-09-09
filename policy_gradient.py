@@ -51,9 +51,8 @@ SUMMARY_DIR     = 'summary/pg_run{}'.format(args['name'][0])
 MODEL_SAVE_DIR  = 'model/'
 BASELINE_SAVE_PATH  = os.path.join(MODEL_SAVE_DIR, 'baseline.param')
 ACTOR_SAVE_PATH = os.path.join(MODEL_SAVE_DIR, 'run{}.actor'.format(args['name'][0]))
-if os.path.isdir(SUMMARY_DIR) or os.path.exists(ACTOR_SAVE_PATH):
-    raise ValueError('actor with name {} already exists!'
-                     .format(args['name'][0]))
+if os.path.isdir(SUMMARY_DIR):
+    raise ValueError('[ERROR] Summar directory already exists!')
 print('Summary file will be saved at {}'.format(SUMMARY_DIR))
 print('Actor model parameter will be saved at {}'.format(ACTOR_SAVE_PATH))
 
@@ -85,14 +84,16 @@ action_dim = env.action_space.sample().shape[0]
 
 # policy network
 policy_net = SimpleNetwork(state_dim + action_dim, action_dim).to(device=device)
-# action_dev = torch.ones(action_dim, device=device, requires_grad=False)
 action_dev = START_DEVIATION
 get_mean_actions = lambda feat: torch.sigmoid(policy_net(feat))     # action \in [0, 1]^{19}
+# load previously trained model if exists
+if os.path.exists(ACTOR_SAVE_PATH):
+    policy_net.load_state_dict(torch.load(ACTOR_SAVE_PATH))
+    print('Actor network parameters loaded successfully!')
 
 # baseline network
 baseline_net = SimpleNetwork(state_dim + action_dim, 1).to(device=device)
 get_baselines = lambda feat: baseline_net(feat)
-# load previously trained model if exists
 if os.path.exists(BASELINE_SAVE_PATH):
     baseline_net.load_state_dict(torch.load(BASELINE_SAVE_PATH))
     print('Baseline network parameters loaded successfully!')
@@ -145,8 +146,16 @@ def get_action(obs, last_act, deterministic=False):
     )
     stocastic_action = randomizer.sample()
     # cutoff into [0, 1]
-    stocastic_action = torch.min(stocastic_action, torch.ones(action_dim))
-    stocastic_action = torch.max(stocastic_action, torch.zeros(action_dim))
+    stocastic_action = torch.min(
+        stocastic_action,
+        torch.ones(action_dim,
+                   dtype=torch.float32,
+                   device=device))
+    stocastic_action = torch.max(
+        stocastic_action,
+        torch.zeros(action_dim,
+                    dtype=torch.float32,
+                    device=device))
     scores = -randomizer.log_prob(stocastic_action)
     return stocastic_action, scores
 
@@ -297,12 +306,7 @@ def train():
         baseline_feature = torch.cat([observations, actions], dim=1)
 
         # get baselines
-        baselines_raw = get_baselines(baseline_feature).reshape([-1])
-        # baselines = (
-        #     baselines_raw * q_values.std(dim=0)
-        #     + q_values.mean(dim=0)
-        # )
-        baselines = baselines_raw
+        baselines = get_baselines(baseline_feature).reshape([-1])
 
         # update baseline net
         baseline_optimizer.zero_grad()
@@ -336,13 +340,14 @@ def train():
         # where
         # - $\text{degree of deviation}$ is minus log-prob of action actually
         #   taken aginst the original intention
-        # - $\text{direction}$ is the advanges in Q-values, i.e. Bellman error
+        # - $\text{direction}$ is the advantages in Q-values, i.e. Bellman error
         #
         # We'd wish this loss is minimized via zeroing $\text{direction}$.
         # However, this value is detached from the graph in this implementation,
         # the optimizer is now shrinking the minus log-probs in a generous fashion instead.
         ############################################################
-        loss = torch.sum(scores * advantages)
+        # loss = torch.sum(scores * advantages)
+        loss = - torch.abs(torch.sum(scores * advantages))    # NOTE: minimize to 0!
         writer.add_scalar('train/policy_loss', loss, episode)
         print('policy loss:', loss)
         loss.backward(retain_graph=True)
