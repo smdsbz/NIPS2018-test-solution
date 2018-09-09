@@ -105,7 +105,7 @@ print('')
 
 
 # policy network
-policy_loss = nn.L1Loss(reduction='sum')
+policy_loss = nn.L1Loss(reduction='elementwise_mean')
 policy_loss_target = torch.zeros([MIN_BATCH_SIZE], dtype=torch.float32, device=device)
 policy_optimizer = optim.Adam(policy_net.parameters(),
                               lr=POLICY_LR)
@@ -360,8 +360,8 @@ def train():
         #                      action_dev.cpu().numpy(),
         #                      episode)
         writer.add_scalar('debug/action_dev', action_dev, episode)
-        if action_dev > MIN_DEVIATION:
-            action_dev *= DEVIATION_DECAY
+        # if action_dev > MIN_DEVIATION:
+        #     action_dev *= DEVIATION_DECAY
 
         # test and eval
         if episode % 5 == 0:
