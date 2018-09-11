@@ -62,7 +62,7 @@ class PolicyGradientAgent:
         mean_action = self.model(feature)[0]
         return mean_action
 
-    def get_action(self, obs, last_act, deterministic=True):
+    def get_action(self, obs, last_act, deterministic=True, numpy=True):
         '''
         get action from policy net
 
@@ -77,6 +77,8 @@ class PolicyGradientAgent:
         '''
         mean_action = self._get_mean_action(obs, last_act)
         if deterministic:
+            if numpy:
+                mean_action = mean_action.detach().cpu().numpy()
             return mean_action
         randomizer = torch.distributions.MultivariateNormal(
             loc=mean_action,
@@ -95,6 +97,8 @@ class PolicyGradientAgent:
             torch.zeros(self.action_dim, dtype=torch.float32, device=self.device)
         )
         scores = - randomizer.log_prob(stocastic_action)
+        if numpy:
+            stocastic_action = stocastic_action.detach().cpu().numpy()
         return stocastic_action, scores
 
     @staticmethod
@@ -149,7 +153,6 @@ class PolicyGradientAgent:
         while not done:
             # take step in environment
             act, act_scores = self.get_action(last_obs, last_act, deterministic=False)
-            act = act.detach().cpu().numpy()
             # NOTE: `act` are detached from graph, but `act_scores` are not!
             #       gradients should flow into `act_scores`!
             for _ in range(smooth_factor):
@@ -187,7 +190,6 @@ class PolicyGradientAgent:
         done = False
         while not done:
             act = self.get_action(last_obs, last_act, deterministic=True)
-            act = act.detach().cpu().numpy()
             for _ in range(smooth_factor):
                 if done:
                     break
@@ -196,9 +198,34 @@ class PolicyGradientAgent:
                 last_act = act
         return reward_sum
 
+    def test(self, env, smooth_factor=1):
+        retrew = self._test_run(env, smooth_factor=smooth_factor)
+        print('Test reward: {}'.format(retrew))
+
+
+    def submit(self, env, smooth_factor=1):
+        obs = env.reset()
+        last_act = env.action_space.sample()
+        reward_sum = 0.0
+        try:
+            while True:
+                act = self.get_action(obs, last_act,
+                                      deterministic=True, numpy=True).tolist()
+                obs, rew, done, _ = env.step(act)
+                reward_sum += rew
+                if done or obs is None:
+                    print('Last submit: reward={}'.format(reward_sum))
+                    reward_sum = 0.0
+                    obs = env.reset()
+                    if obs is None:     # all runs done
+                        break
+        except TypeError:   # HACK: simple condition for "its done"!
+            pass
+        env.submit()
+
     def train(self, env, baseline_model, summary_dir='summary/pg',
               episode=int(1e5), batch_size=2**7, replay_size=int(1e5),
-              train_smooth_factor=5, gamma=0.997):
+              train_smooth_factor=1, gamma=0.997):
         '''
         Args:
             `env`: gym environment (list style)
