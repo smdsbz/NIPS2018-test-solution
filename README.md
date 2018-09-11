@@ -21,8 +21,10 @@ Exploring possible solutions for NIPS2018 challenge. This repo is for convenienc
 Under project root, type  
 
 ```
-$ python3 ./policy_gradient.py
+$ python3 ./run.py -h
 ```
 
-`tensorboardX` summaries will be generated under `./summary/policy_gradient/` .  
+for full list of usage.  
+
+`tensorboardX` summaries will be generated under `./summary/` .  
 

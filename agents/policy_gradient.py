@@ -30,7 +30,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class PolicyGradientAgent:
 
     def __init__(self, observation_space, action_space,
-                 param_path, policy_lr=1e-3,
+                 param_path, policy_lr=1e-6,
                  std_start=10.0, std_floor=1.7, std_slope=0.997,
                  device=device):
         self.observation_dim = observation_space.shape[0]

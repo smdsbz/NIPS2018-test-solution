@@ -43,6 +43,11 @@ class BaselineNetwork:
         self.optimizer = optim.Adam(self.model.parameters(), lr=baseline_lr)
         self.summary_dir = summary_dir
         self.writer = SummaryWriter(summary_dir)
+        if os.path.exists(os.path.join(summary_dir, 'step.txt')):
+            with open(os.path.join(summary_dir, 'step.txt'), 'r') as f:
+                self._ep = int(f.read())
+        else:
+            self._ep = 0
         self.device = device
 
     def get_baselines(self, obs, act):
@@ -67,17 +72,25 @@ class BaselineNetwork:
             `target`: ground-truth Q-value given by environment
             `episode`: episode number, used for summary
         '''
+        # take training step
         self.optimizer.zero_grad()
         loss = self.lossfn(predict, target)
         print('baseline loss:', loss)
         loss.backward(retain_graph=True)
         self.optimizer.step()
-        if all([self.writer, episode]):
-            self.writer.add_scalar('train/baseline_loss', loss, episode)
+        # write summary
+        if episode is not None:
+            self._ep = episode
+        if self.writer is not None:
+            self.writer.add_scalar('train/baseline_loss', loss, self._ep)
+        if episode is None:
+            self._ep += 1
 
     def save(self, path=None):
         if path is not None:
             self.param_path = path
         open(self.param_path, 'w').close()  # empty / touch file
         torch.save(self.model.state_dict(), self.param_path)
+        with open(os.path.join(self.summary_dir, 'step.txt'), 'w') as f:
+            f.write(str(self._ep))
 
