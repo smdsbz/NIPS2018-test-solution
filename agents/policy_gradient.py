@@ -10,8 +10,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from utils import ReplayMemory
-from model import SimpleNetwork
+from .utils import ReplayMemory
+from .model import SimpleNetwork
 
 from osim.env import ProstheticsEnv
 
@@ -118,7 +118,7 @@ class PolicyGradientAgent:
             for t in range(total)
         ])
 
-    def _interact_once(self, env, smooth_factor=None):
+    def _interact_once(self, env, gamma, smooth_factor=None):
         '''
         interact with environment using __current policy__
 
@@ -166,7 +166,7 @@ class PolicyGradientAgent:
                 # prepare for next step
                 last_obs, last_act = obs, act
         # make summary
-        trajectory['q'] = self.get_q(trajectory['rew'])
+        trajectory['q'] = self.get_q(trajectory['rew'], gamma)
         return trajectory
 
     def _test_run(self, env, smooth_factor=None):
@@ -224,19 +224,19 @@ class PolicyGradientAgent:
         replay_buffer = ReplayMemory(replay_size)
         # fill replay with one batch of data before first training step
         while len(replay_buffer) < batch_size:
-            print('\rCollecting forst run: {:.2f}%'
+            print('\rCollecting trajectories for first run: {:.2f}%'
                   .format(len(replay_buffer) / batch_size * 100.0),
                   end='')
-            traj = self._interact_once(env, smooth_factor=train_smooth_factor)
+            traj = self._interact_once(env, gamma, smooth_factor=train_smooth_factor)
             replay_buffer.storemany(traj)
-        print('\rFinished collecting data for first run!' + ' ' * 10)
+        print('\rFinished data collection for first run!' + ' ' * 10)
         # start training
         last_test_reward = -1e8     # HACK: approx. negative infinity
         for ep in range(episode):
             print('======== Episode {} ========'.format(ep))
             # update replay every new training step
             for _ in range(1):      # NOTE: only insert one trajectory
-                traj = self._interact_once(smooth_factor=train_smooth_factor)
+                traj = self._interact_once(env, gamma, smooth_factor=train_smooth_factor)
                 replay_buffer.storemany(traj)
             if torch.cuda.is_available():   # clear memory cache
                 torch.cuda.empty_cache()
@@ -251,8 +251,11 @@ class PolicyGradientAgent:
             writer.add_histogram('debug/advantages', advantages, ep)
             # update policy model
             self.optimizer.zero_grad()
-            loss = self.lossfn(torch.stack(sample.act_scores) * advantages,
+            loss = self.lossfn(torch.stack(sample.act_score) * advantages,
                                _policy_loss_target)
+            print('policy loss:', loss)
+            loss.backward(retain_graph=True)
+            self.optimizer.step()
             if writer is not None:
                 writer.add_scalar('debug/action_dev', self.action_dev, ep)
                 writer.add_scalar('train/policy_loss', loss, ep)

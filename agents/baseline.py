@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from model import SimpleNetwork
+from .model import SimpleNetwork
 
 from tensorboardX import SummaryWriter
 
@@ -33,13 +33,12 @@ class BaselineNetwork:
         observation_dim = observation_space.shape[0]
         action_dim = action_space.shape[0]
         self.param_path = param_path
-        self.model = SimpleNetwork(observation_dim + action_dim, action_dim)
+        self.model = SimpleNetwork(observation_dim + action_dim, 1)
         self.model = self.model.to(device=device)
         if os.path.exists(param_path):
             self.model.load_state_dict(torch.load(param_path))
         else:
-            print('No baseline net parameter file found!')
-            raise
+            print('No baseline net parameter file found. Starting from scratch!')
         self.lossfn = nn.SmoothL1Loss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=baseline_lr)
         self.summary_dir = summary_dir
@@ -71,7 +70,7 @@ class BaselineNetwork:
         self.optimizer.zero_grad()
         loss = self.lossfn(predict, target)
         print('baseline loss:', loss)
-        loss.backward(retrain_graph=True)
+        loss.backward(retain_graph=True)
         self.optimizer.step()
         if all([self.writer, episode]):
             self.writer.add_scalar('train/baseline_loss', loss, episode)

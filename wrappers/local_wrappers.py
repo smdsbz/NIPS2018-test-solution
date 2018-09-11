@@ -11,7 +11,7 @@ class ForceDictObservation(EnvironmentWrapper):
         super().__init__(env)
         self.env = env
         self.time_limit = 300
-    
+
     def reset(self):
         return self.env.reset(project=False)
 

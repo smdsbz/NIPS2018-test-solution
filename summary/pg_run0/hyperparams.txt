@@ -1,4 +1,0 @@
-bs=256
-gamma=0.9
-policylr=0.001
-baselinelr=0.001

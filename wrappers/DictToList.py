@@ -15,7 +15,7 @@ class DictToListFull(EnvironmentWrapper):
         self.env = env
         self.observation_space = gym.spaces.Box(low=-float('Inf'),
                                                 high=float('Inf'),
-                                                shape=(347, ),
+                                                shape=(350, ),
                                                 dtype=np.float32)
 
     def reset(self):
@@ -43,7 +43,7 @@ class DictToListFull(EnvironmentWrapper):
                               'femur_l', 'femur_r', 'head', 'pelvis',
                               'torso', 'pros_foot_r', 'pros_tibia_r']:
                 res += state_desc[info_type][body_part]
-        
+
         # Joint Observations
         # Neglecting `back_0`, `mtp_l`, `subtalar_l` since they do not move
         for info_type in ['joint_pos', 'joint_vel', 'joint_acc']:
@@ -52,9 +52,9 @@ class DictToListFull(EnvironmentWrapper):
                 res += state_desc[info_type][joint]
 
         # Muscle Observations
-        for muscle in ['abd_l', 'abd_r', 'add_l', 'add_r', 
+        for muscle in ['abd_l', 'abd_r', 'add_l', 'add_r',
                        'bifemsh_l', 'bifemsh_r', 'gastroc_l',
-                       'glut_max_l', 'glut_max_r', 
+                       'glut_max_l', 'glut_max_r',
                        'hamstrings_l', 'hamstrings_r',
                        'iliopsoas_l', 'iliopsoas_r', 'rect_fem_l', 'rect_fem_r',
                        'soleus_l', 'tib_ant_l', 'vasti_l', 'vasti_r']:

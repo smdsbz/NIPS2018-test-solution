@@ -20,10 +20,6 @@ from osim.http.client import Client
 from wrappers import ClientToEnv, DictToListFull, ForceDictObservation, JSONable
 from agents import *
 
-# from CONFIG import remote_base, crowdai_token
-remote_base = # TODO
-crowdai_token = # TODO
-
 import torch
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -50,6 +46,8 @@ if __name__ == '__main__':
         raise ValueError('[run] Cannot visualize agent while submitting.')
 
     if args.submit:
+        remote_base = None      # TODO
+        crowdai_token = None    # TODO
         # Submit agent
         client = Client(remote_base)
         client.env_create(crowdai_token, env_id='ProstheticsEnv')
@@ -65,6 +63,8 @@ if __name__ == '__main__':
         env = ForceDictObservation(env)
         env = DictToListFull(env)
         env = JSONable(env)
+        print('state space =', env.observation_space.shape)
+        print('action space =', env.action_space.sample().shape)
         baseline = BaselineNetwork(
             env.observation_space, env.action_space,
             param_path='model/baseline.param', baseline_lr=1e-4,

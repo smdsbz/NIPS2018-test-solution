@@ -107,3 +107,9 @@ venv.bak/
 *.vim
 *.swp
 
+# Trained Models
+model/
+
+# Summaries
+summary/
+
