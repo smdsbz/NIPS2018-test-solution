@@ -122,7 +122,9 @@ class PolicyGradientAgent:
             for t in range(total)
         ])
 
-    def _interact_once(self, env, gamma, smooth_factor=None):
+    def _interact_once(self, env, gamma,
+                       smooth_factor=None,
+                       fixed_reward=False):
         '''
         interact with environment using __current policy__
 
@@ -159,6 +161,8 @@ class PolicyGradientAgent:
                 if done:
                     break
                 obs, rew, done, _ = env.step(act)
+                if fixed_reward:
+                    rew = 1.0
                 # add to memory
                 trajectory['obs'].append(last_obs)
                 trajectory['last_act'].append(last_act)
@@ -172,7 +176,7 @@ class PolicyGradientAgent:
         trajectory['q'] = self.get_q(trajectory['rew'], gamma)
         return trajectory
 
-    def _test_run(self, env, smooth_factor=None):
+    def _test_run(self, env, smooth_factor=None, fixed_reward=True):
         '''
         Args:
             `env`: gym environment
@@ -194,6 +198,8 @@ class PolicyGradientAgent:
                 if done:
                     break
                 last_obs, rew, done, _ = env.step(act)
+                if fixed_reward:
+                    rew = 1.0
                 reward_sum += rew
                 last_act = act
         return reward_sum
@@ -225,7 +231,7 @@ class PolicyGradientAgent:
 
     def train(self, env, baseline_model, summary_dir='summary/pg',
               episode=int(1e5), batch_size=2**7, replay_size=int(1e5),
-              train_smooth_factor=1, gamma=0.997):
+              train_smooth_factor=1, gamma=0.997, fixed_reward=True):
         '''
         Args:
             `env`: gym environment (list style)
@@ -237,6 +243,8 @@ class PolicyGradientAgent:
             `train_smooth_factor`: `int`: training-time action smooth factor
                 (training-time only)
             `gamma`: gamma in Bellman equation (in [0, 1])
+            `fixed_reward`: fix reward of every step to 1, the learning goal
+                then changes to stand as long as possible
         '''
         # prepare summary directory
         if os.path.isdir(summary_dir):  # clear former summaries
@@ -254,7 +262,9 @@ class PolicyGradientAgent:
             print('\rCollecting trajectories for first run: {:.2f}%'
                   .format(len(replay_buffer) / batch_size * 100.0),
                   end='')
-            traj = self._interact_once(env, gamma, smooth_factor=train_smooth_factor)
+            traj = self._interact_once(env, gamma,
+                                       smooth_factor=train_smooth_factor,
+                                       fixed_reward=fixed_reward)
             replay_buffer.storemany(traj)
         print('\rFinished data collection for first run!' + ' ' * 10)
         # start training
@@ -263,7 +273,9 @@ class PolicyGradientAgent:
             print('======== Episode {} ========'.format(ep))
             # update replay every new training step
             for _ in range(1):      # NOTE: only insert one trajectory
-                traj = self._interact_once(env, gamma, smooth_factor=train_smooth_factor)
+                traj = self._interact_once(env, gamma,
+                                           smooth_factor=train_smooth_factor,
+                                           fixed_reward=fixed_reward)
                 replay_buffer.storemany(traj)
             if torch.cuda.is_available():   # clear memory cache
                 torch.cuda.empty_cache()
@@ -289,7 +301,9 @@ class PolicyGradientAgent:
             if self.action_dev > self.std_floor:
                 self.action_dev *= self.std_slope
             if ep % 5 == 0:
-                test_reward = self._test_run(env, smooth_factor=train_smooth_factor)
+                test_reward = self._test_run(env,
+                                             smooth_factor=train_smooth_factor,
+                                             fixed_reward=fixed_reward)
                 print('==> test reward:', test_reward)
                 baseline_model.save()
                 if last_test_reward < test_reward:
