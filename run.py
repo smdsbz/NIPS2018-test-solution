@@ -72,7 +72,7 @@ if __name__ == '__main__':
         )
         agent = SpecifiedAgent(
             env.observation_space, env.action_space, 'model/pg.actor',
-            policy_lr=1e-3,
+            policy_lr=1e-6,
             device=device
        )
         agent.train(
