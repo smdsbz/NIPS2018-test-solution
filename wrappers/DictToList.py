@@ -35,7 +35,6 @@ class DictToListFull(EnvironmentWrapper):
         """
         res = []
 
-        idx = 0
         # Body Observations
         for info_type in ['body_pos', 'body_pos_rot',
                           'body_vel', 'body_vel_rot',
@@ -44,9 +43,6 @@ class DictToListFull(EnvironmentWrapper):
                               'femur_l', 'femur_r', 'head', 'pelvis',
                               'torso', 'pros_foot_r', 'pros_tibia_r']:
                 res += state_desc[info_type][body_part]
-                if info_type == 'body_pos_rot' and body_part == 'head':
-                    print(idx)
-                idx += 3
 
         # Joint Observations
         # Neglecting `back_0`, `mtp_l`, `subtalar_l` since they do not move
