@@ -113,3 +113,5 @@ model/
 # Summaries
 summary/
 
+# VS Code Workspace Config
+.vscode/

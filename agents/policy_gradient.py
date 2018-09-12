@@ -162,7 +162,11 @@ class PolicyGradientAgent:
                     break
                 obs, rew, done, _ = env.step(act)
                 if fixed_reward:
-                    rew = 1.0
+                    rew = 10.0
+                    # HACK: reward shaping: stay away from the ground!!!
+                    rew -= 3.0 * max(0.84 - obs[-8], 0.0)
+                    # HACK: reward shaping: stay up right!!!
+                    rew -= 50.0 * (obs[51] ** 2)
                 # add to memory
                 trajectory['obs'].append(last_obs)
                 trajectory['last_act'].append(last_act)
@@ -312,4 +316,3 @@ class PolicyGradientAgent:
                     torch.save(self.model.state_dict(), self.param_path)
                 if writer is not None:
                     writer.add_scalar('test/test_reward', test_reward, ep)
-

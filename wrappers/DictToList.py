@@ -35,6 +35,7 @@ class DictToListFull(EnvironmentWrapper):
         """
         res = []
 
+        idx = 0
         # Body Observations
         for info_type in ['body_pos', 'body_pos_rot',
                           'body_vel', 'body_vel_rot',
@@ -43,6 +44,9 @@ class DictToListFull(EnvironmentWrapper):
                               'femur_l', 'femur_r', 'head', 'pelvis',
                               'torso', 'pros_foot_r', 'pros_tibia_r']:
                 res += state_desc[info_type][body_part]
+                if info_type == 'body_pos_rot' and body_part == 'head':
+                    print(idx)
+                idx += 3
 
         # Joint Observations
         # Neglecting `back_0`, `mtp_l`, `subtalar_l` since they do not move
@@ -75,6 +79,21 @@ class DictToListFull(EnvironmentWrapper):
         res += state_desc['misc']['mass_center_pos']
         res += state_desc['misc']['mass_center_vel']
         res += state_desc['misc']['mass_center_acc']
+
+        # x - forward axis
+        # y - upward axis
+        # z - horizontal axis
+
+        # mass center height from ground
+        # print('mass_center_pos:', state_desc['misc']['mass_center_pos'])
+        # print(res[-8])
+        # want res[-8] above a certain value, approx. 0.84
+
+        # angle between horizon
+        # print(state_desc['body_pos_rot']['head'])
+        # print(res[51], res[52], res[53])
+        # want res[51] close to 0
+        # TODO: if running, want res[53] close to a certain value
 
         return res
 

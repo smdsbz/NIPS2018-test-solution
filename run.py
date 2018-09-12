@@ -90,7 +90,7 @@ if __name__ == '__main__':
         env = DictToListFull(env)
         env = JSONable(env)
         agent = SpecifiedAgent(
-            env.observation_space, env.action_space, 'model/pg_60.actor',
+            env.observation_space, env.action_space, 'model/pg.actor',
             device=device
         )
         agent.test(env, smooth_factor=1)
