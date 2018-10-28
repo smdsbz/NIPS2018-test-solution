@@ -169,6 +169,7 @@ class PolicyGradientAgent:
                 obs, rew, done, _ = env.step(act)
                 if fixed_reward:
                     rew = 10.0
+<<<<<<< HEAD
                     rew -= 3.0 * (obs[-6] - 1.0) ** 2
                 if shaped_reward:
                     # HACK: reward shaping: don't go side-ways!!!
@@ -184,6 +185,17 @@ class PolicyGradientAgent:
                     # # HACK: reward shaping: don't cross your legs!!!
                     rew -= 1.0 * (min(obs[45], 0.0) ** 2)
                     rew -= 1.0 * (max(obs[48], 0.0) ** 2)
+=======
+                    # # HACK: reward shaping: stay away from the ground!!!
+                    rew -= 3.0 * max(0.85 - obs[-8], 0.0)
+                    # HACK: reward shaping: stay up right!!!
+                    rew -= 8.0 * (obs[51] ** 2)
+                    # HACK: reward shaping: face forward!!!
+                    rew -= 5.0 * (obs[52] ** 2)
+                    # HACK: reward shaping: don't cross your legs!!!
+                    rew -= 12.0 * ((obs[45] - 0.01 ** 2))
+                    rew -= 12.0 * ((obs[48] + 0.01 ** 2))
+>>>>>>> 70d4fd0934db88e974de675a0300845b66560e7d
                 # add to memory
                 trajectory['obs'].append(last_obs)
                 trajectory['last_act'].append(last_act)
