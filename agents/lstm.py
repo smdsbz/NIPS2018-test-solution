@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from .utils import ReplayMemory
-from .model import SimpleNetwork
+from .model import LSTMNetwork
 
 from osim.env import ProstheticsEnv
 
@@ -27,7 +27,7 @@ import os
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-class PolicyGradientAgent:
+class LSTMAgent:
 
     def __init__(self, observation_space, action_space,
                  param_path, policy_lr=1e-6,
@@ -37,54 +37,50 @@ class PolicyGradientAgent:
         self.observation_dim = observation_space.shape[0]
         self.action_dim = action_space.shape[0]
         self.param_path = param_path
-        self.model = SimpleNetwork(self.observation_dim + self.action_dim,
-                                   self.action_dim)
+        self.model = LSTMNetwork(self.observation_dim, self.action_dim)
         self.model = self.model.to(device=device)
         if param_path and os.path.exists(param_path):
             print('Loading previously trained actor net parameters...')
             self.model.load_state_dict(torch.load(param_path))
         else:
             print('No trained actor net found. Starting from scratch!')
-        self.lossfn = nn.L1Loss()
+        # self.lossfn = nn.L1Loss()
+        self.lossfn = lambda x: torch.mean(x)
         self.optimizer = optim.Adam(self.model.parameters(), lr=policy_lr)
         # training-time stotastic action noise control parameters
         self.std_start = std_start
         self.std_floor = std_floor
         self.std_slope = std_slope
         self.action_dev = std_start
-        # self.action_dev = torch.ones(self.action_dim,
-        #                              dtype=torch.float32,
-        #                              device=self.device,
-        #                              requires_grad=True) * self.std_start
         self.policy_lr = policy_lr
 
-    def _get_mean_action(self, obs, last_act):
-        obs = torch.tensor(obs, dtype=torch.float32, device=self.device)
-        last_act = torch.tensor(last_act, dtype=torch.float32, device=self.device)
-        feature = torch.cat([obs, last_act])
-        feature = torch.stack([feature])
-        mean_action = self.model(feature)[0]
-        return torch.sigmoid(mean_action)
+    def _get_mean_action(self, obs, last_h=None, last_c=None):
+        obs = torch.tensor([[obs]], dtype=torch.float32, device=self.device)
+        mean_action, (curr_h, curr_c) = self.model(obs, h=last_h, c=last_c)
+        mean_action = torch.sigmoid(mean_action[0][0])
+        return mean_action, (curr_h, curr_c)
 
-    def get_action(self, obs, last_act, deterministic=True, numpy=True):
+    def get_action(self, obs, last_h=None, last_c=None,
+                   deterministic=True, numpy=True):
         '''
         get action from policy net
 
         Args:
             `obs`: observation vector
-            `last_act`: action taken in last step
+            `last_h, last_c`: LSTM states
             `deterministic`: whether to apply randomizer
 
         Return:
             When `deterministic` is `True`, returns action vector only;
             else returns randomized action and its scores w.r.t. randomizer
         '''
-        mean_action = self._get_mean_action(obs, last_act)
+        mean_action, (curr_h, curr_c) = \
+            self._get_mean_action(obs, last_h=last_h, last_c=last_c)
         if deterministic:
             mean_action = mean_action.detach()
             if numpy:
                 mean_action = mean_action.cpu().numpy()
-            return mean_action
+            return mean_action, (curr_h, curr_c)
         randomizer = torch.distributions.MultivariateNormal(
             loc=mean_action,
             covariance_matrix=torch.eye(self.action_dim,
@@ -106,7 +102,7 @@ class PolicyGradientAgent:
         stocastic_action = stocastic_action.detach()
         if numpy:
             stocastic_action = stocastic_action.cpu().numpy()
-        return stocastic_action, scores
+        return stocastic_action, scores, (curr_h, curr_c)
 
     @staticmethod
     def get_q(rewards, gamma):
@@ -130,7 +126,7 @@ class PolicyGradientAgent:
         ])
 
     def _interact_once(self, env, gamma, smooth_factor=None,
-                       fixed_reward=False, shaped_reward=True):
+                       fixed_reward=False, shaped_reward=False):
         '''
         interact with environment using __current policy__
 
@@ -147,20 +143,21 @@ class PolicyGradientAgent:
             smooth_factor = 1
         last_obs = env.reset()
         # NOTE: YOLO-ed the 0-th step, maybe come back with something better!
-        last_act = env.action_space.sample()
         done = False
         trajectory = {
             'obs': [],
-            'last_act': [],
             'act': [],
             'act_score': [],
             'rew': [],
             'done': [],
             'q': []
         }
+        last_h, last_c = None, None
         while not done:
             # take step in environment
-            act, act_scores = self.get_action(last_obs, last_act, deterministic=False)
+            act, act_scores, (last_h, last_c) = \
+                self.get_action(last_obs, last_h=last_h, last_c=last_c,
+                                deterministic=False)
             # NOTE: `act` are detached from graph, but `act_scores` are not!
             #       gradients should flow into `act_scores`!
             for _ in range(smooth_factor):
@@ -169,30 +166,29 @@ class PolicyGradientAgent:
                 obs, rew, done, _ = env.step(act)
                 if fixed_reward:
                     rew = 10.0
-                    rew -= 3.0 * (obs[-6] - 1.0) ** 2
+                    # rew -= 3.0 * (obs[-6] - 1.0) ** 2
                 if shaped_reward:
                     # HACK: reward shaping: don't go side-ways!!!
-                    rew -= 1.0 * (obs[-4] ** 2)
+                    # rew -= 1.0 * (obs[-4] ** 2)
                     # HACK: reward shaping: stay away from the ground!!!
-                    rew -= 1.0 * max(0.83 - obs[-8], 0.0)
+                    # rew -= 1.0 * max(0.83 - obs[-8], 0.0)
                     # HACK: reward shaping: stay up right!!!
-                    rew -= 1.0 * (obs[57] ** 2)
+                    # rew -= 1.0 * (obs[57] ** 2)
                     # HACK: reward shaping: face forward!!!
-                    rew -= 1.0 * (obs[58] ** 2)
+                    # rew -= 1.0 * (obs[58] ** 2)
                     # HACK: reward shaping: don't back off!!!
-                    rew -= 1.0 * (max(obs[59] + 0.10, 0.0) ** 2)
+                    rew -= 8.0 * (max(obs[59], 0.0) ** 2)
                     # # HACK: reward shaping: don't cross your legs!!!
-                    rew -= 1.0 * (min(obs[45], 0.0) ** 2)
-                    rew -= 1.0 * (max(obs[48], 0.0) ** 2)
+                    # rew -= 1.0 * (min(obs[45], 0.0) ** 2)
+                    # rew -= 1.0 * (max(obs[48], 0.0) ** 2)
                 # add to memory
                 trajectory['obs'].append(last_obs)
-                trajectory['last_act'].append(last_act)
                 trajectory['act'].append(act)
                 trajectory['act_score'].append(act_scores)
                 trajectory['rew'].append(rew)
                 trajectory['done'].append(done)
                 # prepare for next step
-                last_obs, last_act = obs, act
+                last_obs = obs
         # make summary
         trajectory['q'] = self.get_q(trajectory['rew'], gamma)
         return trajectory
@@ -211,10 +207,12 @@ class PolicyGradientAgent:
             smooth_factor = 1
         reward_sum = 0.0
         last_obs = env.reset()
-        last_act = env.action_space.sample()
         done = False
+        last_h, last_c = None, None
         while not done:
-            act = self.get_action(last_obs, last_act, deterministic=True)
+            act, (last_h, last_c) = \
+                self.get_action(last_obs, last_h=last_h, last_c=last_c,
+                                deterministic=True)
             for _ in range(smooth_factor):
                 if done:
                     break
@@ -222,7 +220,6 @@ class PolicyGradientAgent:
                 if fixed_reward:
                     rew = 1.0
                 reward_sum += rew
-                last_act = act
         return reward_sum
 
     def test(self, env, smooth_factor=1):
@@ -251,10 +248,10 @@ class PolicyGradientAgent:
             pass
         env.submit()
 
-    def train(self, env, baseline_model, summary_dir='summary/pg',
+    def train(self, env, baseline_model, summary_dir='summary/lstm',
               episode=int(1e5), batch_size=2**7, replay_size=int(1e5),
               train_smooth_factor=1, gamma=0.997,
-              fixed_reward=False, shaped_reward=True):
+              fixed_reward=False, shaped_reward=False):
         '''
         Args:
             `env`: gym environment (list style)
@@ -277,9 +274,9 @@ class PolicyGradientAgent:
         with open(os.path.join(summary_dir, 'hyperparams.txt'), 'w') as f:
             f.write('bs={}\ngamma={}\npolicylr={}'
                     .format(batch_size, gamma, self.policy_lr))
-        # prepare training utilities
-        _policy_loss_target = torch.zeros([batch_size], dtype=torch.float32, device=self.device)
-        replay_buffer = ReplayMemory(replay_size)
+        # # prepare training utilities
+        # _policy_loss_target = - 1e8 * torch.ones([batch_size], dtype=torch.float32, device=self.device)
+        replay_buffer = ReplayMemory(replay_size, store_last_act=False)
         # fill replay with one batch of data before first training step
         while len(replay_buffer) < batch_size:
             print('\rCollecting trajectories for first run: {:.2f}%'
@@ -299,8 +296,9 @@ class PolicyGradientAgent:
             for _ in range(1):      # NOTE: only insert one trajectory
                 traj = self._interact_once(env, gamma,
                                            smooth_factor=train_smooth_factor,
-                                           fixed_reward=fixed_reward)
-                writer.add_scalar('train/train_reward_shaped', np.sum(traj['rew']), ep)
+                                           fixed_reward=fixed_reward,
+                                           shaped_reward=shaped_reward)
+                writer.add_scalar('train/train_reward', np.sum(traj['rew']), ep)
                 replay_buffer.storemany(traj)
             if torch.cuda.is_available():   # clear memory cache
                 torch.cuda.empty_cache()
@@ -315,21 +313,17 @@ class PolicyGradientAgent:
             writer.add_histogram('debug/advantages', advantages, ep)
             # update policy model
             self.optimizer.zero_grad()
-            loss = self.lossfn(torch.stack(sample.act_score) * advantages,
-                               _policy_loss_target)
+            # loss = self.lossfn(torch.stack(sample.act_score) * advantages,
+            #                    _policy_loss_target)
+            loss = self.lossfn(- torch.stack(sample.act_score) * advantages)
             print('policy loss:', loss)
             loss.backward(retain_graph=True)
-            self.optimizer.step()
+            self.optimizer.step()   # minimize
             if writer is not None:
                 writer.add_scalar('debug/action_dev', self.action_dev, ep)
-                # writer.add_histogram('debug/action_dev', self.action_dev, ep)
                 writer.add_scalar('train/policy_loss', loss, ep)
             if self.action_dev > self.std_floor:
                 self.action_dev *= self.std_slope
-            # if self.action_dev.grad is not None:
-            #     with torch.no_grad():
-            #         writer.add_histogram('debug/action_dev.grad', self.action_dev.grad, ep)
-            #         self.action_dev -= self.policy_lr * self.action_dev.grad
             if ep % 5 == 0:
                 test_reward = self._test_run(env,
                                              smooth_factor=train_smooth_factor,

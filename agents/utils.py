@@ -14,33 +14,53 @@ import random
 class ReplayMemory:
     ''' Overwriting Replay Memory '''
 
-    def __init__(self, size):
+    def __init__(self, size, store_last_act=True):
         '''
         `size`: maximum capacity of memory
         '''
         self._size = size
-        self.__record_class = namedtuple(
-            'ReplayRecord',
-            'obs, last_act,  act, act_score, rew, done, q'
-        )
-        self._memory = self.__record_class(
-            obs=[], last_act=[], act=[], act_score=[], rew=[], done=[], q=[]
-        )
+        self._store_last_act = store_last_act
+        if store_last_act:
+            self.__record_class = namedtuple(
+                'ReplayRecord',
+                'obs, last_act,  act, act_score, rew, done, q'
+            )
+            self._memory = self.__record_class(
+                obs=[], last_act=[], act=[], act_score=[], rew=[], done=[], q=[]
+            )
+        else:
+            self.__record_class = namedtuple(
+                'ReplayRecord',
+                'obs, act, act_score, rew, done, q'
+            )
+            self._memory = self.__record_class(
+                obs=[], act=[], act_score=[], rew=[], done=[], q=[]
+            )
         self._pointer = 0
 
     def __len__(self):
         return len(self._memory.obs)
 
     def __getitem__(self, key):
-        return self.__record_class(
-            obs=self._memory.obs[key % self._size],
-            last_act=self._memory.last_act[key % self._size],
-            act=self._memory.act[key % self._size],
-            act_score=self._memory.act_score[key % self._size],
-            rew=self._memory.rew[key % self._size],
-            done=self._memory.done[key % self._size],
-            q=self._memory.q[key % self._size]
-        )
+        if self._store_last_act:
+            return self.__record_class(
+                obs=self._memory.obs[key % self._size],
+                last_act=self._memory.last_act[key % self._size],
+                act=self._memory.act[key % self._size],
+                act_score=self._memory.act_score[key % self._size],
+                rew=self._memory.rew[key % self._size],
+                done=self._memory.done[key % self._size],
+                q=self._memory.q[key % self._size]
+            )
+        else:
+            return self.__record_class(
+                obs=self._memory.obs[key % self._size],
+                act=self._memory.act[key % self._size],
+                act_score=self._memory.act_score[key % self._size],
+                rew=self._memory.rew[key % self._size],
+                done=self._memory.done[key % self._size],
+                q=self._memory.q[key % self._size]
+            )
 
     def store(self, contents):
         '''
@@ -52,7 +72,8 @@ class ReplayMemory:
         # alloc space if still can
         if len(self) < self._size:
             self._memory.obs.append(None)
-            self._memory.last_act.append(None)
+            if self._store_last_act:
+                self._memory.last_act.append(None)
             self._memory.act.append(None)
             self._memory.act_score.append(None)
             self._memory.rew.append(None)
@@ -62,7 +83,8 @@ class ReplayMemory:
         #     print('utils.py:ReplayMemory: storage reached rooftop, replacing older records!')
         # store values
         self._memory.obs[self._pointer] = contents['obs']
-        self._memory.last_act[self._pointer] = contents['last_act']
+        if self._store_last_act:
+            self._memory.last_act[self._pointer] = contents['last_act']
         self._memory.act[self._pointer] = contents['act']
         self._memory.act_score[self._pointer] = contents['act_score']
         self._memory.rew[self._pointer] = contents['rew']
@@ -73,23 +95,40 @@ class ReplayMemory:
         return
 
     def storemany(self, contents):
-        if len(contents['obs']) != len(contents['last_act'])            \
-                or len(contents['obs']) != len(contents['act'])         \
-                or len(contents['obs']) != len(contents['act_score'])   \
-                or len(contents['obs']) != len(contents['rew'])         \
-                or len(contents['obs']) != len(contents['done'])        \
-                or len(contents['q']) != len(contents['q']):
-            raise ValueError('Every entery of dict should have same length!')
-        for idx in range(len(contents['obs'])):
-            self.store({
-                'obs': contents['obs'][idx],
-                'last_act': contents['last_act'][idx],
-                'act': contents['act'][idx],
-                'act_score': contents['act_score'][idx],
-                'rew': contents['rew'][idx],
-                'done': contents['done'][idx],
-                'q': contents['q'][idx]
-            })
+        if self._store_last_act:
+            if len(contents['obs']) != len(contents['last_act'])            \
+                    or len(contents['obs']) != len(contents['act'])         \
+                    or len(contents['obs']) != len(contents['act_score'])   \
+                    or len(contents['obs']) != len(contents['rew'])         \
+                    or len(contents['obs']) != len(contents['done'])        \
+                    or len(contents['q']) != len(contents['q']):
+                raise ValueError('Every entery of dict should have same length!')
+            for idx in range(len(contents['obs'])):
+                self.store({
+                    'obs': contents['obs'][idx],
+                    'last_act': contents['last_act'][idx],
+                    'act': contents['act'][idx],
+                    'act_score': contents['act_score'][idx],
+                    'rew': contents['rew'][idx],
+                    'done': contents['done'][idx],
+                    'q': contents['q'][idx]
+                })
+        else:
+            if  len(contents['obs']) != len(contents['act'])                \
+                    or len(contents['obs']) != len(contents['act_score'])   \
+                    or len(contents['obs']) != len(contents['rew'])         \
+                    or len(contents['obs']) != len(contents['done'])        \
+                    or len(contents['q']) != len(contents['q']):
+                raise ValueError('Every entery of dict should have same length!')
+            for idx in range(len(contents['obs'])):
+                self.store({
+                    'obs': contents['obs'][idx],
+                    'act': contents['act'][idx],
+                    'act_score': contents['act_score'][idx],
+                    'rew': contents['rew'][idx],
+                    'done': contents['done'][idx],
+                    'q': contents['q'][idx]
+                })
         return
 
     def sample(self, batch_size):
@@ -103,17 +142,29 @@ class ReplayMemory:
             `namedtuple`: `namedtuple` of `list`s
         '''
         idxes = random.sample(range(len(self._memory.obs)), batch_size)
-        retsample = self.__record_class(
-            obs=[], last_act=[], act=[], act_score=[], rew=[], done=[], q=[]
-        )
-        for idx in idxes:
-            retsample.obs.append(self._memory.obs[idx])
-            retsample.last_act.append(self._memory.last_act[idx])
-            retsample.act.append(self._memory.act[idx])
-            retsample.act_score.append(self._memory.act_score[idx])
-            retsample.rew.append(self._memory.rew[idx])
-            retsample.done.append(self._memory.done[idx])
-            retsample.q.append(self._memory.q[idx])
+        if self._store_last_act:
+            retsample = self.__record_class(
+                obs=[], last_act=[], act=[], act_score=[], rew=[], done=[], q=[]
+            )
+            for idx in idxes:
+                retsample.obs.append(self._memory.obs[idx])
+                retsample.last_act.append(self._memory.last_act[idx])
+                retsample.act.append(self._memory.act[idx])
+                retsample.act_score.append(self._memory.act_score[idx])
+                retsample.rew.append(self._memory.rew[idx])
+                retsample.done.append(self._memory.done[idx])
+                retsample.q.append(self._memory.q[idx])
+        else:
+            retsample = self.__record_class(
+                obs=[], act=[], act_score=[], rew=[], done=[], q=[]
+            )
+            for idx in idxes:
+                retsample.obs.append(self._memory.obs[idx])
+                retsample.act.append(self._memory.act[idx])
+                retsample.act_score.append(self._memory.act_score[idx])
+                retsample.rew.append(self._memory.rew[idx])
+                retsample.done.append(self._memory.done[idx])
+                retsample.q.append(self._memory.q[idx])
         return retsample
 
     # def sample_unpacked(self, batch_size):

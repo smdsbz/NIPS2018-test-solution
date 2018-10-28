@@ -36,3 +36,27 @@ class SimpleNetwork(nn.Module):
         x = self.activ4(self.fc4(x))
         return self.out(x)
 
+
+class LSTMNetwork(nn.Module):
+
+    def __init__(self, input_dim, output_dim):
+        super(LSTMNetwork, self).__init__()
+        self.lstm0 = nn.LSTM(input_dim, 512, num_layers=2,
+                             bias=True)
+        self.fc1 = nn.Linear(512, 512)
+        self.activ1 = nn.SELU()
+        self.fc2 = nn.Linear(512, 512)
+        self.activ2 = nn.SELU()
+        self.fc3 = nn.Linear(512, 512)
+        self.activ3 = nn.SELU()
+        self.out = nn.Linear(512, output_dim)
+
+    def forward(self, x, h=None, c=None):
+        if h is None or c is None:
+            x, (h, c) = self.lstm0(x)
+        else:
+            x, (h, c) = self.lstm0(x, (h, c))
+        x = self.activ1(self.fc1(x))
+        x = self.activ2(self.fc2(x))
+        x = self.activ3(self.fc3(x))
+        return ( self.out(x), (h, c) )

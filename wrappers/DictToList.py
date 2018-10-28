@@ -36,13 +36,18 @@ class DictToListFull(EnvironmentWrapper):
         res = []
 
         # Body Observations
+        idx = 0
         for info_type in ['body_pos', 'body_pos_rot',
                           'body_vel', 'body_vel_rot',
                           'body_acc', 'body_acc_rot']:
             for body_part in ['calcn_l', 'talus_l', 'tibia_l', 'toes_l',
                               'femur_l', 'femur_r', 'head', 'pelvis',
                               'torso', 'pros_foot_r', 'pros_tibia_r']:
+                if info_type == 'body_pos_rot' and body_part == 'torso':
+                    # print(idx)
+                    pass
                 res += state_desc[info_type][body_part]
+                idx += 3
 
         # Joint Observations
         # Neglecting `back_0`, `mtp_l`, `subtalar_l` since they do not move
@@ -90,6 +95,18 @@ class DictToListFull(EnvironmentWrapper):
         # print(res[51], res[52], res[53])
         # want res[51] close to 0
         # TODO: if running, want res[53] close to a certain value
+
+        # print('femur_l:', state_desc['body_pos_rot']['femur_l'])    # want approx. 0+
+        # print([ res[i] for i in [45, 46, 47] ])
+        # print('femur_r:', state_desc['body_pos_rot']['femur_r'])    # want approx. 0-
+        # print([ res[i] for i in [48, 49, 50] ])
+
+        # print(state_desc['body_pos_rot']['torso'])
+        # print([ res[i] for i in [57, 58, 59] ])
+        # print(8.0 * (max(res[59], 0.0) ** 2))
+
+        # print(state_desc['misc']['mass_center_vel'])
+        # print(res[-6])
 
         return res
 

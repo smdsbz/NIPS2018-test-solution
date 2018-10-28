@@ -26,8 +26,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run or submit agent.')
-    # parser.add_argument('agent', help='specify agent\'s class name.')
-    parser.add_argument('-t', '--train', action='store', dest='nb_steps',
+    parser.add_argument('agent', help='specify agent\'s class name.')
+    parser.add_argument('-t', '--train', action='store_true',
                         help='train agent locally')
     parser.add_argument('-s', '--submit', action='store_true', default=False,
                         help='submit agent to crowdAI server')
@@ -35,12 +35,11 @@ if __name__ == '__main__':
                         help='render the environment locally')
     args = parser.parse_args()
 
-    # if args.agent not in globals():
-    #     raise ValueError('[run] Agent {} not found.'.format(args.agent))
-    # SpecifiedAgent = globals()[args.agent]
-    SpecifiedAgent = PolicyGradientAgent
+    if args.agent not in globals():
+        raise ValueError('[run] Agent {} not found.'.format(args.agent))
+    SpecifiedAgent = globals()[args.agent]
 
-    if args.submit and args.nb_steps:
+    if args.submit and args.train:
         raise ValueError('[run] Cannot train and submit agent at same time.')
 
     if args.submit and args.visualize:
@@ -57,32 +56,23 @@ if __name__ == '__main__':
         client_env = JSONable(client_env)
         agent = SpecifiedAgent(
             client_env.observation_space, client_env.action_space,
-            'model/pg.actor'
+            'model/{}.param'.format(args.agent)
         )
         agent.submit(client_env, smooth_factor=1)
-    elif args.nb_steps:
-        # Train agent locally
-        env = ProstheticsEnv(visualize=args.visualize)
+    elif args.train:
+        env = ProstheticsEnv(visualize=args.visualize,
+                             difficulty=0)
         env = ForceDictObservation(env)
         env = DictToListFull(env)
         env = JSONable(env)
         print('state space =', env.observation_space.shape)
         print('action space =', env.action_space.sample().shape)
-        baseline = BaselineNetwork(
-            env.observation_space, env.action_space,
-            param_path='model/baseline.param', baseline_lr=1e-4,
-            device=device
-        )
         agent = SpecifiedAgent(
-            env.observation_space, env.action_space, 'model/pg.actor',
-            policy_lr=1e-6,
-            device=device
+            env.observation_space, env.action_space,
+            'model/{}.param'.format(args.agent)
         )
-        agent.train(
-            env, baseline,
-            episode=int(args.nb_steps), batch_size=2**7, replay_size=int(1e5),
-            train_smooth_factor=1, gamma=0.997, fixed_reward=True
-        )
+        agent.train(env, summary_dir='summary/{}'.format(args.agent),
+                    fixed_reward=False)
     else:
         # Test agent locally
         env = ProstheticsEnv(visualize=args.visualize)
@@ -90,7 +80,7 @@ if __name__ == '__main__':
         env = DictToListFull(env)
         env = JSONable(env)
         agent = SpecifiedAgent(
-            env.observation_space, env.action_space, 'model/pg.actor',
-            device=device
+            env.observation_space, env.action_space,
+            'model/{}.param'.format(args.agent),
         )
-        agent.test(env, smooth_factor=1)
+        agent.test(env)
